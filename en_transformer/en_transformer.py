@@ -91,13 +91,7 @@ class EGAT(nn.Module):
         m_ij = self.edge_mlp(edge_input)
 
         coor_weights = self.coors_mlp(m_ij)
-        mask_value = -torch.finfo(coor_weights.dtype).max
-
-        mask = rearrange(torch.eye(n).bool(), 'i j -> () () i j')
-        coor_weights.masked_fill_(mask, mask_value)
-        coors_attn = coor_weights.softmax(dim = -1)
-
-        coors_out = einsum('b h i j, b i j c -> b i c', coors_attn, rel_coors) + coors
+        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, rel_coors) + coors
 
         # derive attention
 

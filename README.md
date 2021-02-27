@@ -1,6 +1,6 @@
-## E(n)-transformer (wip)
+## E(n)-Equivariant Transformer (wip)
 
-Implementation of E(n)-Transformer, which extends the ideas of Welling's <a href="https://github.com/lucidrains/egnn-pytorch">E(n)-Equivariant Graph Neural Network</a> to attention
+Implementation of E(n)-Equivariant Transformer, which extends the ideas from Welling's <a href="https://github.com/lucidrains/egnn-pytorch">E(n)-Equivariant Graph Neural Network</a> with attention. Aiming to be a replacement for the computationally burdensome <a href="https://github.com/lucidrains/se3-transformer-pytorch">SE3-Transformer</a>.
 
 ## Citations
 

@@ -20,6 +20,15 @@ def fourier_encode_dist(x, num_encodings = 4, include_self = True):
 
 # classes
 
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, feats, coors, **kwargs):
+        feats_out, coors = self.fn(feats, coors, **kwargs)
+        return feats + feats_out, coors
+
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
@@ -156,8 +165,8 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features)),
-                PreNorm(dim, FeedForward(dim = dim))
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features))),
+                Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 
     def forward(self, feats, coors, edges = None):

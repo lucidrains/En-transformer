@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'En-transformer',
   packages = find_packages(),
-  version = '0.0.2',
+  version = '0.0.3',
   license='MIT',
   description = 'E(n)-Equivariant Transformer',
   author = 'Phil Wang',
@@ -17,7 +17,7 @@ setup(
   ],
   install_requires=[
     'einops>=0.3',
-    'torch>=1.6'
+    'torch>=1.7'
   ],
   setup_requires=[
     'pytest-runner',

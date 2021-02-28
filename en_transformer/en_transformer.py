@@ -75,7 +75,6 @@ class EquivariantAttention(nn.Module):
         attn_inner_dim = heads * dim_head
         self.heads = heads
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
-
         self.to_out = nn.Linear(attn_inner_dim, dim)
 
         edge_input_dim = (fourier_features * 2) + (dim_head * 2) + edge_dim + 1
@@ -83,7 +82,8 @@ class EquivariantAttention(nn.Module):
         self.edge_mlp = nn.Sequential(
             nn.Linear(edge_input_dim, edge_input_dim * 2),
             nn.ReLU(),
-            nn.Linear(edge_input_dim * 2, m_dim)
+            nn.Linear(edge_input_dim * 2, m_dim),
+            nn.ReLU()
         )
 
         self.to_attn_mlp = nn.Sequential(

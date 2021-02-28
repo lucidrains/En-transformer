@@ -20,14 +20,44 @@ def fourier_encode_dist(x, num_encodings = 4, include_self = True):
 
 # classes
 
-class EGAT(nn.Module):
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.fn = fn
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, feats, coors, **kwargs):
+        feats = self.norm(feats)
+        feats, coors = self.fn(feats, coors, **kwargs)
+        return feats, coors
+
+class FeedForward(nn.Module):
     def __init__(
         self,
+        *,
         dim,
+        mult = 4,
+        dropout = 0.
+    ):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.GELU(),
+            nn.Linear(dim * 4, dim)
+        )
+
+    def forward(self, feats, coors):
+        return self.net(feats), coors
+
+class EquivariantAttention(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        dim_head = 64,
+        heads = 4,
         edge_dim = 0,
         m_dim = 16,
-        heads = 4,
-        dim_head = 64,
         fourier_features = 0
     ):
         super().__init__()
@@ -36,6 +66,7 @@ class EGAT(nn.Module):
         attn_inner_dim = heads * dim_head
         self.heads = heads
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
+
         self.to_out = nn.Linear(attn_inner_dim, dim)
 
         edge_input_dim = (fourier_features * 2) + (dim_head * 2) + edge_dim + 1
@@ -60,7 +91,7 @@ class EGAT(nn.Module):
             Rearrange('... () -> ...')
         )
 
-    def forward(self, feats, coors, edges = None):
+    def forward(self, feats, coors, basis, edges = None):
         b, n, d, h, fourier_features, device = *feats.shape, self.heads, self.fourier_features, feats.device
 
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
@@ -91,7 +122,7 @@ class EGAT(nn.Module):
         m_ij = self.edge_mlp(edge_input)
 
         coor_weights = self.coors_mlp(m_ij)
-        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, rel_coors) + coors
+        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, basis) + coors
 
         # derive attention
 
@@ -105,3 +136,35 @@ class EGAT(nn.Module):
         out = self.to_out(out)
 
         return out, coors_out
+
+# transformer
+
+class EnTransformer(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        depth,
+        dim_head = 64,
+        heads = 8,
+        edge_dim = 0,
+        m_dim = 16,
+        fourier_features = 0
+    ):
+        super().__init__()
+
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features)),
+                PreNorm(dim, FeedForward(dim = dim))
+            ]))
+
+    def forward(self, feats, coors, edges = None):
+        basis = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
+
+        for attn, ff in self.layers:
+            feats, coors = attn(feats, coors, basis = basis, edges = edges)
+            feats, coors = ff(feats, coors)
+
+        return feats, coors

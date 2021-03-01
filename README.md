@@ -2,6 +2,8 @@
 
 Implementation of E(n)-Equivariant Transformer, which extends the ideas from Welling's <a href="https://github.com/lucidrains/egnn-pytorch">E(n)-Equivariant Graph Neural Network</a> with attention.
 
+Note - still having issues where at depths greater than 1, equivariance is not preserved.
+
 ## Install
 
 ```bash

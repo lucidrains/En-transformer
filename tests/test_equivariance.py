@@ -5,7 +5,7 @@ from en_transformer import EnTransformer
 def test_equivariance():
     model = EnTransformer(
         dim = 512,
-        depth = 1,
+        depth = 12,
         edge_dim = 4,
         fourier_features = 2
     )

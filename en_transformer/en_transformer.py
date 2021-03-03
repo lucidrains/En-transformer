@@ -56,7 +56,7 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, feats, coors):
-        return self.net(feats), coors
+        return self.net(feats), 0
 
 class EquivariantAttention(nn.Module):
     def __init__(
@@ -131,7 +131,7 @@ class EquivariantAttention(nn.Module):
         m_ij = self.edge_mlp(edge_input)
 
         coor_weights = self.coors_mlp(m_ij)
-        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, basis) + coors
+        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, basis)
 
         # derive attention
 
@@ -171,9 +171,13 @@ class EnTransformer(nn.Module):
 
     def forward(self, feats, coors, edges = None):
         basis = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
+        coors_delta = 0
 
         for attn, ff in self.layers:
-            feats, coors = attn(feats, coors, basis = basis, edges = edges)
-            feats, coors = ff(feats, coors)
+            feats, coors_out = attn(feats, coors, basis = basis, edges = edges)
+            coors_delta += coors_out
 
-        return feats, coors
+            feats, coors_out = ff(feats, coors)
+            coors_delta += coors_out
+
+        return feats, coors + coors_delta

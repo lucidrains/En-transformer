@@ -27,7 +27,9 @@ feats = torch.randn(1, 16, 512)
 coors = torch.randn(1, 16, 3)
 edges = torch.randn(1, 16, 16, 4)
 
-feats, coors = model(feats, coors, edges)  # (1, 16, 512), (1, 16, 3)
+mask = torch.ones(1, 16).bool()
+
+feats, coors = model(feats, coors, edges, mask = mask)  # (1, 16, 512), (1, 16, 3)
 ```
 
 ## Todo

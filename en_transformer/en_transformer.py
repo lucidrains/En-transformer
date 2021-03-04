@@ -100,7 +100,14 @@ class EquivariantAttention(nn.Module):
             Rearrange('... () -> ...')
         )
 
-    def forward(self, feats, coors, basis, edges = None):
+    def forward(
+        self,
+        feats,
+        coors,
+        basis,
+        edges = None,
+        mask = None
+    ):
         b, n, d, h, fourier_features, device = *feats.shape, self.heads, self.fourier_features, feats.device
 
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
@@ -117,6 +124,11 @@ class EquivariantAttention(nn.Module):
         q, k, v = self.to_qkv(feats).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
+        # prepare mask
+
+        if exists(mask):
+            mask = rearrange(mask, 'b i -> b () i ()') * rearrange(mask, 'b j -> b () () j')
+
         # expand queries and keys for concatting
 
         q = repeat(q, 'b h i d -> b h i n d', n = n)
@@ -131,11 +143,20 @@ class EquivariantAttention(nn.Module):
         m_ij = self.edge_mlp(edge_input)
 
         coor_weights = self.coors_mlp(m_ij)
+
+        if exists(mask):
+            coor_weights.masked_fill_(mask, 0.)
+
         coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, basis)
 
         # derive attention
 
         sim = self.to_attn_mlp(m_ij)
+
+        if exists(mask):
+            max_neg_value = -torch.finfo(sim.dtype).max
+            sim.masked_fill_(mask, max_neg_value)
+
         attn = sim.softmax(dim = -1)
 
         # weighted sum of values and combine heads
@@ -169,12 +190,18 @@ class EnTransformer(nn.Module):
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 
-    def forward(self, feats, coors, edges = None):
+    def forward(
+        self,
+        feats,
+        coors,
+        edges = None,
+        mask = None
+    ):
         basis = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
         coors_delta = 0
 
         for attn, ff in self.layers:
-            feats, coors_out = attn(feats, coors, basis = basis, edges = edges)
+            feats, coors_out = attn(feats, coors, basis = basis, edges = edges, mask = mask)
             coors_delta += coors_out
 
             feats, coors_out = ff(feats, coors)

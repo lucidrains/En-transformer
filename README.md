@@ -32,7 +32,7 @@ feats, coors = model(feats, coors, edges)  # (1, 16, 512), (1, 16, 3)
 
 ## Todo
 
-- [ ] masking
+- [x] masking
 - [ ] neighborhoods by radius
 
 ## Citations

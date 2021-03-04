@@ -7,7 +7,7 @@ torch.set_default_dtype(torch.float64)
 def test_equivariance():
     model = EnTransformer(
         dim = 512,
-        depth = 48,
+        depth = 6,
         edge_dim = 4,
         fourier_features = 2
     )

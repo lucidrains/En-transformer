@@ -12,14 +12,14 @@ def test_readme():
         heads = 8,
         edge_dim = 4,
         fourier_features = 2,
-        num_nearest_neighbors = 64
+        num_nearest_neighbors = 6
     )
 
-    feats = torch.randn(1, 1024, 512)
-    coors = torch.randn(1, 1024, 3)
-    edges = torch.randn(1, 1024, 1024, 4)
+    feats = torch.randn(1, 32, 512)
+    coors = torch.randn(1, 32, 3)
+    edges = torch.randn(1, 32, 1024, 4)
 
-    mask = torch.ones(1, 1024).bool()
+    mask = torch.ones(1, 32).bool()
 
     feats, coors = model(feats, coors, edges, mask = mask)
     assert True, 'it runs'

@@ -9,6 +9,22 @@ from einops.layers.torch import Rearrange
 def exists(val):
     return val is not None
 
+def batched_index_select(values, indices, dim = 1):
+    value_dims = values.shape[(dim + 1):]
+    values_shape, indices_shape = map(lambda t: list(t.shape), (values, indices))
+    indices = indices[(..., *((None,) * len(value_dims)))]
+    indices = indices.expand(*((-1,) * len(indices_shape)), *value_dims)
+    value_expand_len = len(indices_shape) - (dim + 1)
+    values = values[(*((slice(None),) * dim), *((None,) * value_expand_len), ...)]
+
+    value_expand_shape = [-1] * len(values.shape)
+    expand_slice = slice(dim, (dim + value_expand_len))
+    value_expand_shape[expand_slice] = indices.shape[expand_slice]
+    values = values.expand(*value_expand_shape)
+
+    dim += value_expand_len
+    return values.gather(dim, indices)
+
 def fourier_encode_dist(x, num_encodings = 4, include_self = True):
     x = x.unsqueeze(-1)
     device, dtype, orig_x = x.device, x.dtype, x
@@ -106,7 +122,8 @@ class EquivariantAttention(nn.Module):
         coors,
         basis,
         edges = None,
-        mask = None
+        mask = None,
+        nbhd_indices = None
     ):
         b, n, d, h, fourier_features, device = *feats.shape, self.heads, self.fourier_features, feats.device
 
@@ -124,20 +141,43 @@ class EquivariantAttention(nn.Module):
         q, k, v = self.to_qkv(feats).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
+        # calculate nearest neighbors
+
+        i = j = n
+
+        if exists(nbhd_indices):
+            i, j = nbhd_indices.shape[-2:]
+            nbhd_indices_with_heads = repeat(nbhd_indices, 'b n d -> b h n d', h = h)
+            k = batched_index_select(k, nbhd_indices_with_heads, dim = 2)
+            v = batched_index_select(v, nbhd_indices_with_heads, dim = 2)
+            rel_dist = batched_index_select(rel_dist, nbhd_indices_with_heads, dim = 3)
+            basis = batched_index_select(basis, nbhd_indices, dim = 2)
+        else:
+            k = repeat(k, 'b h j d -> b h n j d', n = n)
+
         # prepare mask
 
         if exists(mask):
-            mask = rearrange(mask, 'b i -> b () i ()') * rearrange(mask, 'b j -> b () () j')
+            q_mask = rearrange(mask, 'b i -> b () i ()')
+            k_mask = repeat(mask, 'b j -> b h i j', i = n, h = h)
+
+            if exists(nbhd_indices):
+                k_mask = batched_index_select(k_mask, nbhd_indices_with_heads, dim = 3)
+
+            mask = q_mask * k_mask
 
         # expand queries and keys for concatting
 
-        q = repeat(q, 'b h i d -> b h i n d', n = n)
-        k = repeat(k, 'b h j d -> b h n j d', n = n)
+        q = repeat(q, 'b h i d -> b h i n d', n = j)
 
         edge_input = torch.cat((q, k, rel_dist), dim = -1)
 
         if exists(edges):
             edges = repeat(edges, 'b i j d -> b h i j d', h = h)
+
+            if exists(nbhd_indices):
+                edges = batched_index_select(edges, nbhd_indices_with_heads, dim = 3)
+
             edge_input = torch.cat((edge_input, edges), dim = -1)
 
         m_ij = self.edge_mlp(edge_input)
@@ -161,7 +201,8 @@ class EquivariantAttention(nn.Module):
 
         # weighted sum of values and combine heads
 
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        aggregate_einsum_note = 'b h i j, b h j d -> b h i d' if not exists(nbhd_indices) else 'b h i j, b h i j d -> b h i d'
+        out = einsum(aggregate_einsum_note, attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
         out = self.to_out(out)
 
@@ -179,9 +220,11 @@ class EnTransformer(nn.Module):
         heads = 8,
         edge_dim = 0,
         m_dim = 16,
-        fourier_features = 0
+        fourier_features = 0,
+        num_nearest_neighbors = 0
     ):
         super().__init__()
+        self.num_nearest_neighbors = num_nearest_neighbors
 
         self.layers = nn.ModuleList([])
         for _ in range(depth):
@@ -197,11 +240,23 @@ class EnTransformer(nn.Module):
         edges = None,
         mask = None
     ):
-        basis = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
+        n, num_nn = feats.shape[1], self.num_nearest_neighbors
+
+        rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
+
+        # calculate nearest neighbors
+
+        nbhd_indices = None
+        if num_nn > 0 and num_nn < n:
+            rel_dist = rel_coors.norm(dim = -1, p = 2)
+            nbhd_indices = rel_dist.topk(num_nn, dim = -1).indices
+
+        # main network
+
         coors_delta = 0
 
         for attn, ff in self.layers:
-            feats, coors_out = attn(feats, coors, basis = basis, edges = edges, mask = mask)
+            feats, coors_out = attn(feats, coors, basis = rel_coors, edges = edges, nbhd_indices = nbhd_indices, mask = mask)
             coors_delta += coors_out
 
             feats, coors_out = ff(feats, coors)

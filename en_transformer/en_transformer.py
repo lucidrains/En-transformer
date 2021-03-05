@@ -148,10 +148,10 @@ class EquivariantAttention(nn.Module):
         if exists(nbhd_indices):
             i, j = nbhd_indices.shape[-2:]
             nbhd_indices_with_heads = repeat(nbhd_indices, 'b n d -> b h n d', h = h)
-            k = batched_index_select(k, nbhd_indices_with_heads, dim = 2)
-            v = batched_index_select(v, nbhd_indices_with_heads, dim = 2)
+            k        = batched_index_select(k, nbhd_indices_with_heads, dim = 2)
+            v        = batched_index_select(v, nbhd_indices_with_heads, dim = 2)
             rel_dist = batched_index_select(rel_dist, nbhd_indices_with_heads, dim = 3)
-            basis = batched_index_select(basis, nbhd_indices, dim = 2)
+            basis    = batched_index_select(basis, nbhd_indices, dim = 2)
         else:
             k = repeat(k, 'b h j d -> b h n j d', n = n)
 
@@ -159,11 +159,12 @@ class EquivariantAttention(nn.Module):
 
         if exists(mask):
             q_mask = rearrange(mask, 'b i -> b () i ()')
-            k_mask = repeat(mask, 'b j -> b h i j', i = n, h = h)
+            k_mask = repeat(mask, 'b j -> b i j', i = n)
 
             if exists(nbhd_indices):
-                k_mask = batched_index_select(k_mask, nbhd_indices_with_heads, dim = 3)
+                k_mask = batched_index_select(k_mask, nbhd_indices, dim = 2)
 
+            k_mask = rearrange(k_mask, 'b i j -> b () i j')
             mask = q_mask * k_mask
 
         # expand queries and keys for concatting
@@ -173,11 +174,10 @@ class EquivariantAttention(nn.Module):
         edge_input = torch.cat((q, k, rel_dist), dim = -1)
 
         if exists(edges):
-            edges = repeat(edges, 'b i j d -> b h i j d', h = h)
-
             if exists(nbhd_indices):
-                edges = batched_index_select(edges, nbhd_indices_with_heads, dim = 3)
+                edges = batched_index_select(edges, nbhd_indices, dim = 2)
 
+            edges = repeat(edges, 'b i j d -> b h i j d', h = h)
             edge_input = torch.cat((edge_input, edges), dim = -1)
 
         m_ij = self.edge_mlp(edge_input)

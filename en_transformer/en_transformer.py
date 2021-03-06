@@ -249,7 +249,7 @@ class EnTransformer(nn.Module):
         nbhd_indices = None
         if num_nn > 0 and num_nn < n:
             rel_dist = rel_coors.norm(dim = -1, p = 2)
-            nbhd_indices = rel_dist.topk(num_nn, dim = -1).indices
+            nbhd_indices = rel_dist.topk(num_nn, dim = -1, largest = False).indices
 
         # main network
 

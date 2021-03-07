@@ -109,10 +109,13 @@ class EquivariantAttention(nn.Module):
             Rearrange('... () -> ...')
         )
 
+        last_coors_linear = nn.Linear(m_dim * 4, 1)
+        last_coors_linear.weight.data.zero_()
+
         self.coors_mlp = nn.Sequential(
             nn.Linear(m_dim, m_dim * 4),
             nn.ReLU(),
-            nn.Linear(m_dim * 4, 1),
+            last_coors_linear,
             Rearrange('... () -> ...')
         )
 

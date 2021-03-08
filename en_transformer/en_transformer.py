@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from torch import nn, einsum
 
 from einops import rearrange, repeat
@@ -83,7 +84,9 @@ class EquivariantAttention(nn.Module):
         heads = 4,
         edge_dim = 0,
         m_dim = 16,
-        fourier_features = 0
+        fourier_features = 0,
+        norm_rel_coors = False,
+        norm_coor_weights = False
     ):
         super().__init__()
         self.fourier_features = fourier_features
@@ -116,8 +119,11 @@ class EquivariantAttention(nn.Module):
             nn.Linear(m_dim, m_dim * 4),
             nn.ReLU(),
             last_coors_linear,
-            Rearrange('... () -> ...')
+            Rearrange('... () -> ...'),
+            nn.TanH() if norm_coor_weights else nn.Identity()
         )
+
+        self.norm_rel_coors = norm_rel_coors
 
     def forward(
         self,
@@ -190,6 +196,9 @@ class EquivariantAttention(nn.Module):
         if exists(mask):
             coor_weights.masked_fill_(mask, 0.)
 
+        if self.norm_rel_coors:
+            basis = F.normalize(basis, dim = -1, p = 2)
+
         coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, basis)
 
         # derive attention
@@ -224,7 +233,9 @@ class EnTransformer(nn.Module):
         edge_dim = 0,
         m_dim = 16,
         fourier_features = 0,
-        num_nearest_neighbors = 0
+        num_nearest_neighbors = 0,
+        norm_rel_coors = False,
+        norm_coor_weights = False
     ):
         super().__init__()
         self.num_nearest_neighbors = num_nearest_neighbors
@@ -232,7 +243,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

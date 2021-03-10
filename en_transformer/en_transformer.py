@@ -86,7 +86,8 @@ class EquivariantAttention(nn.Module):
         m_dim = 16,
         fourier_features = 0,
         norm_rel_coors = False,
-        norm_coor_weights = False
+        norm_coor_weights = False,
+        init_eps = 1e-3
     ):
         super().__init__()
         self.fourier_features = fourier_features
@@ -124,6 +125,13 @@ class EquivariantAttention(nn.Module):
         )
 
         self.norm_rel_coors = norm_rel_coors
+
+        self.init_eps = init_eps
+        self.apply(self.init_)
+
+    def init_(self, module):
+        if type(module) in {nn.Linear}:
+            module.weight.data.fill_(self.init_eps)
 
     def forward(
         self,
@@ -235,7 +243,8 @@ class EnTransformer(nn.Module):
         fourier_features = 0,
         num_nearest_neighbors = 0,
         norm_rel_coors = False,
-        norm_coor_weights = False
+        norm_coor_weights = False,
+        init_eps = 1e-3
     ):
         super().__init__()
         self.num_nearest_neighbors = num_nearest_neighbors
@@ -243,7 +252,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights, init_eps = init_eps))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

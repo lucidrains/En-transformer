@@ -131,7 +131,7 @@ class EquivariantAttention(nn.Module):
 
     def init_(self, module):
         if type(module) in {nn.Linear}:
-            module.weight.data.fill_(self.init_eps)
+            nn.init.normal_(module.weight, std = self.init_eps)
 
     def forward(
         self,

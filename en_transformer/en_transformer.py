@@ -46,11 +46,21 @@ class Residual(nn.Module):
         feats_out, coors_delta = self.fn(feats, coors, **kwargs)
         return feats + feats_out, coors + coors_delta
 
+class ScaleNorm(nn.Module):
+    def __init__(self, dim, eps = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.g = nn.Parameter(torch.ones(1))
+
+    def forward(self, x):
+        n = torch.norm(x, dim = -1, keepdim = True).clamp(min = self.eps)
+        return x / n * self.g
+
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.norm = nn.LayerNorm(dim)
+        self.norm = ScaleNorm(dim)
 
     def forward(self, feats, coors, **kwargs):
         feats = self.norm(feats)

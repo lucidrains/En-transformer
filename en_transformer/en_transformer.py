@@ -43,8 +43,8 @@ class Residual(nn.Module):
         self.fn = fn
 
     def forward(self, feats, coors, **kwargs):
-        feats_out, coors = self.fn(feats, coors, **kwargs)
-        return feats + feats_out, coors
+        feats_out, coors_delta = self.fn(feats, coors, **kwargs)
+        return feats + feats_out, coors + coors_delta
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -240,7 +240,7 @@ class EnTransformer(nn.Module):
         heads = 8,
         edge_dim = 0,
         m_dim = 16,
-        fourier_features = 0,
+        fourier_features = 4,
         num_nearest_neighbors = 0,
         norm_rel_coors = False,
         norm_coor_weights = False,
@@ -276,13 +276,8 @@ class EnTransformer(nn.Module):
 
         # main network
 
-        coors_delta = 0
-
         for attn, ff in self.layers:
-            feats, coors_out = attn(feats, coors, basis = rel_coors, edges = edges, nbhd_indices = nbhd_indices, mask = mask)
-            coors_delta += coors_out
+            feats, coors = attn(feats, coors, basis = rel_coors, edges = edges, nbhd_indices = nbhd_indices, mask = mask)
+            feats, coors = ff(feats, coors)
 
-            feats, coors_out = ff(feats, coors)
-            coors_delta += coors_out
-
-        return feats, coors + coors_delta
+        return feats, coors

@@ -69,13 +69,14 @@ def test_equivariance_with_nearest_neighbors():
 
 def test_depth():
     model = EnTransformer(
-        dim = 64,
+        dim = 8,
         depth = 12,
         edge_dim = 4,
-        fourier_features = 2
+        fourier_features = 2,
+        num_nearest_neighbors = 16
     )
 
-    feats = torch.randn(1, 128, 64)
+    feats = torch.randn(1, 128, 8)
     coors = torch.randn(1, 128, 3)
     edges = torch.randn(1, 128, 128, 4)
 

@@ -126,7 +126,7 @@ class EquivariantAttention(nn.Module):
         )
 
         self.coors_mlp = nn.Sequential(
-            nn.Linear(m_dim, m_dim * 4),
+            nn.Linear(m_dim * heads, m_dim * 4),
             nn.ReLU(),
             nn.Linear(m_dim * 4, 1),
             Rearrange('... () -> ...'),
@@ -213,15 +213,17 @@ class EquivariantAttention(nn.Module):
 
         m_ij = self.edge_mlp(edge_input)
 
-        coor_weights = self.coors_mlp(m_ij)
+        coor_mlp_input = rearrange(m_ij, 'b h i j d -> b i j (h d)')
+        coor_weights = self.coors_mlp(coor_mlp_input)
 
         if exists(mask):
-            coor_weights.masked_fill_(mask, 0.)
+            coor_mask = rearrange(mask, 'b () i j -> b i j')
+            coor_weights.masked_fill_(~coor_mask, 0.)
 
         if self.norm_rel_coors:
             rel_coors = F.normalize(rel_coors, dim = -1, p = 2)
 
-        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, rel_coors)
+        coors_out = einsum('b i j, b i j c -> b i c', coor_weights, rel_coors)
 
         # derive attention
 

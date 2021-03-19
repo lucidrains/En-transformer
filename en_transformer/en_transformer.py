@@ -97,10 +97,12 @@ class EquivariantAttention(nn.Module):
         fourier_features = 0,
         norm_rel_coors = False,
         norm_coor_weights = False,
+        num_nearest_neighbors = 0,
         init_eps = 1e-3
     ):
         super().__init__()
         self.fourier_features = fourier_features
+        self.num_nearest_neighbors = num_nearest_neighbors
 
         attn_inner_dim = heads * dim_head
         self.heads = heads
@@ -144,15 +146,20 @@ class EquivariantAttention(nn.Module):
         self,
         feats,
         coors,
-        basis,
         edges = None,
-        mask = None,
-        nbhd_indices = None
+        mask = None
     ):
-        b, n, d, h, fourier_features, device = *feats.shape, self.heads, self.fourier_features, feats.device
+        b, n, d, h, fourier_features, num_nn, device = *feats.shape, self.heads, self.fourier_features, self.num_nearest_neighbors, feats.device
 
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
-        rel_dist = (rel_coors ** 2).sum(dim = -1, keepdim = True)
+        rel_dist = rel_coors.norm(dim = -1, p = 2)
+
+        nbhd_indices = None
+        if num_nn > 0:
+            rel_dist = rel_coors.norm(dim = -1, p = 2)
+            nbhd_indices = rel_dist.topk(num_nn, dim = -1, largest = False).indices
+
+        rel_dist = rearrange(rel_dist, 'b i j -> b i j ()')
 
         if fourier_features > 0:
             rel_dist = fourier_encode_dist(rel_dist, num_encodings = fourier_features)
@@ -172,10 +179,10 @@ class EquivariantAttention(nn.Module):
         if exists(nbhd_indices):
             i, j = nbhd_indices.shape[-2:]
             nbhd_indices_with_heads = repeat(nbhd_indices, 'b n d -> b h n d', h = h)
-            k        = batched_index_select(k, nbhd_indices_with_heads, dim = 2)
-            v        = batched_index_select(v, nbhd_indices_with_heads, dim = 2)
-            rel_dist = batched_index_select(rel_dist, nbhd_indices_with_heads, dim = 3)
-            basis    = batched_index_select(basis, nbhd_indices, dim = 2)
+            k         = batched_index_select(k, nbhd_indices_with_heads, dim = 2)
+            v         = batched_index_select(v, nbhd_indices_with_heads, dim = 2)
+            rel_dist  = batched_index_select(rel_dist, nbhd_indices_with_heads, dim = 3)
+            rel_coors = batched_index_select(rel_coors, nbhd_indices, dim = 2)
         else:
             k = repeat(k, 'b h j d -> b h n j d', n = n)
 
@@ -212,9 +219,9 @@ class EquivariantAttention(nn.Module):
             coor_weights.masked_fill_(mask, 0.)
 
         if self.norm_rel_coors:
-            basis = F.normalize(basis, dim = -1, p = 2)
+            rel_coors = F.normalize(rel_coors, dim = -1, p = 2)
 
-        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, basis)
+        coors_out = einsum('b h i j, b i j c -> b i c', coor_weights, rel_coors)
 
         # derive attention
 
@@ -222,7 +229,7 @@ class EquivariantAttention(nn.Module):
 
         if exists(mask):
             max_neg_value = -torch.finfo(sim.dtype).max
-            sim.masked_fill_(mask, max_neg_value)
+            sim.masked_fill_(~mask, max_neg_value)
 
         attn = sim.softmax(dim = -1)
 
@@ -243,6 +250,7 @@ class EnTransformer(nn.Module):
         *,
         dim,
         depth,
+        num_tokens = None,
         dim_head = 64,
         heads = 8,
         edge_dim = 0,
@@ -254,14 +262,16 @@ class EnTransformer(nn.Module):
         init_eps = 1e-3
     ):
         super().__init__()
-        self.num_nearest_neighbors = num_nearest_neighbors
+        self.token_emb = nn.Embedding(num_tokens, dim) if exists(num_tokens) else None
 
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights, init_eps = init_eps))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights, num_nearest_neighbors = num_nearest_neighbors, init_eps = init_eps))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
+
+        self.num_nearest_neighbors = num_nearest_neighbors
 
     def forward(
         self,
@@ -272,19 +282,13 @@ class EnTransformer(nn.Module):
     ):
         n, num_nn = feats.shape[1], self.num_nearest_neighbors
 
-        rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
-
-        # calculate nearest neighbors
-
-        nbhd_indices = None
-        if num_nn > 0 and num_nn < n:
-            rel_dist = rel_coors.norm(dim = -1, p = 2)
-            nbhd_indices = rel_dist.topk(num_nn, dim = -1, largest = False).indices
+        if exists(self.token_emb):
+            feats = self.token_emb(feats)
 
         # main network
 
         for attn, ff in self.layers:
-            feats, coors = attn(feats, coors, basis = rel_coors, edges = edges, nbhd_indices = nbhd_indices, mask = mask)
+            feats, coors = attn(feats, coors, edges = edges, mask = mask)
             feats, coors = ff(feats, coors)
 
         return feats, coors

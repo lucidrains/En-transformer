@@ -282,8 +282,6 @@ class EnTransformer(nn.Module):
         edges = None,
         mask = None
     ):
-        n, num_nn = feats.shape[1], self.num_nearest_neighbors
-
         if exists(self.token_emb):
             feats = self.token_emb(feats)
 

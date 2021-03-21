@@ -46,26 +46,32 @@ class Residual(nn.Module):
         feats_out, coors_delta = self.fn(feats, coors, **kwargs)
         return feats + feats_out, coors + coors_delta
 
-class ScaleNorm(nn.Module):
-    def __init__(self, dim, eps = 1e-5):
+class RMSNorm(nn.Module):
+    def __init__(self, dim, eps = 1e-8):
         super().__init__()
+        self.scale = dim ** -0.5
         self.eps = eps
-        self.g = nn.Parameter(torch.ones(1))
+        self.g = nn.Parameter(torch.ones(dim))
 
     def forward(self, x):
-        n = torch.norm(x, dim = -1, keepdim = True).clamp(min = self.eps)
-        return x / n * self.g
+        norm = torch.norm(x, dim = -1, keepdim = True) * self.scale
+        return x / norm.clamp(min = self.eps) * self.g
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.norm = ScaleNorm(dim)
+        self.norm = RMSNorm(dim)
 
     def forward(self, feats, coors, **kwargs):
         feats = self.norm(feats)
         feats, coors = self.fn(feats, coors, **kwargs)
         return feats, coors
+
+class GEGLU(nn.Module):
+    def forward(self, x):
+        x, gates = x.chunk(2, dim = -1)
+        return x * F.gelu(gates)
 
 class FeedForward(nn.Module):
     def __init__(
@@ -77,8 +83,9 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(dim, dim * 4),
-            nn.GELU(),
+            nn.Linear(dim, dim * 4 * 2),
+            GEGLU(),
+            nn.Dropout(dropout),
             nn.Linear(dim * 4, dim)
         )
 

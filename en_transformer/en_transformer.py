@@ -163,7 +163,6 @@ class EquivariantAttention(nn.Module):
 
         nbhd_indices = None
         if num_nn > 0:
-            rel_dist = rel_coors.norm(dim = -1, p = 2)
             nbhd_indices = rel_dist.topk(num_nn, dim = -1, largest = False).indices
 
         rel_dist = rearrange(rel_dist, 'b i j -> b i j ()')

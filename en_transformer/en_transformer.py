@@ -124,7 +124,7 @@ class EquivariantAttention(nn.Module):
         self.to_out = nn.Linear(attn_inner_dim, dim)
 
         pos_dim = (fourier_features * 2) + 1
-        edge_input_dim = dim_head + edge_dim
+        edge_input_dim = (dim_head * 2) + edge_dim
 
         self.to_pos_emb = nn.Sequential(
             nn.Linear(pos_dim, dim_head * 2),
@@ -270,7 +270,7 @@ class EquivariantAttention(nn.Module):
 
         q = repeat(q, 'b h i d -> b h i n d', n = j)
 
-        edge_input = (q - k) + rel_dist_pos_emb
+        edge_input = torch.cat(((q * k), rel_dist_pos_emb), dim = -1)
 
         if exists(edges):
             if exists(nbhd_indices):

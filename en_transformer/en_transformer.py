@@ -148,14 +148,18 @@ class EquivariantAttention(nn.Module):
         )
 
         self.coors_mlp = nn.Sequential(
-            nn.Linear(m_dim * heads, m_dim * 4),
+            nn.Linear(m_dim, m_dim * 4),
             nn.ReLU(),
             nn.Linear(m_dim * 4, 1),
-            Rearrange('... () -> ...'),
-            nn.TanH() if norm_coor_weights else nn.Identity()
+            Rearrange('... () -> ...')
         )
 
         self.rel_coors_norm = CoorsNorm() if norm_rel_coors else nn.Identity()
+
+        self.to_coors_out = nn.Sequential(
+            nn.Linear(heads, 1),
+            Rearrange('... () -> ...')
+        )
 
         self.init_eps = init_eps
         self.apply(self.init_)
@@ -254,15 +258,17 @@ class EquivariantAttention(nn.Module):
 
         m_ij = self.edge_mlp(edge_input)
 
-        coor_mlp_input = rearrange(m_ij, 'b h i j d -> b i j (h d)')
-        coor_weights = self.coors_mlp(coor_mlp_input)
+        coor_weights = self.coors_mlp(m_ij)
 
         if exists(mask):
-            coor_mask = rearrange(mask, 'b () i j -> b i j')
-            coor_weights.masked_fill_(~coor_mask, 0.)
+            max_neg_value = -torch.finfo(coor_weights.dtype).max
+            coor_weights.masked_fill_(~mask, max_neg_value)
+            coor_weights = coor_weights.softmax(dim = -1)
 
         rel_coors = self.rel_coors_norm(rel_coors)
-        coors_out = einsum('b i j, b i j c -> b i c', coor_weights, rel_coors)
+
+        coors_out = einsum('b h i j, b i j c -> b i c h', coor_weights, rel_coors)
+        coors_out = self.to_coors_out(coors_out)
 
         # derive attention
 

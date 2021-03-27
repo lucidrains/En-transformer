@@ -163,7 +163,14 @@ class EquivariantAttention(nn.Module):
 
         nbhd_indices = None
         if num_nn > 0:
-            nbhd_indices = rel_dist.topk(num_nn, dim = -1, largest = False).indices
+            ranking = rel_dist
+
+            # make sure padding does not end up becoming neighbors
+            if exists(mask):
+                ranking_mask = mask[:, :, None] * mask[:, None, :]
+                ranking = ranking.masked_fill(~ranking_mask, 1e5)
+
+            nbhd_indices = ranking.topk(num_nn, dim = -1, largest = False).indices
 
         rel_dist = rearrange(rel_dist, 'b i j -> b i j ()')
 

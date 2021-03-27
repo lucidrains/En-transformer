@@ -33,6 +33,47 @@ mask = torch.ones(1, 1024).bool()
 feats, coors = model(feats, coors, edges, mask = mask)  # (1, 16, 512), (1, 16, 3)
 ```
 
+If you would like to only attend to sparse neighbors, as defined by an adjacency matrix (say for atoms), you have to set one more flag and then pass in the `N x N` adjacency matrix.
+
+```python
+import torch
+from en_transformer import EnTransformer
+
+model = EnTransformer(
+    dim = 512,
+    depth = 1,
+    heads = 4,
+    dim_head = 32,
+    fourier_features = 2,
+    num_nearest_neighbors = 0,
+    only_sparse_neighbors = True
+)
+
+feats = torch.randn(1, 16, 512)
+coors = torch.randn(1, 16, 3)
+
+# naively assume a single chain of atoms
+i = torch.arange(feats.shape[1])
+adj_mat = (i[:, None] <= (i[None, :] + 1)) & (i[:, None] >= (i[None, :] - 1))
+
+# adjacency matrix must be passed in
+feats_out, coors_out = model(feats, coors, adj_mat = adj_mat) # (1, 16, 512), (1, 16, 3)
+```
+
+## Example
+
+To run a protein backbone coordinate denoising toy task, first install `sidechainnet`
+
+```bash
+$ pip install sidechainnet
+```
+
+Then
+
+```bash
+$ python denoise.py
+```
+
 ## Citations
 
 ```bibtex

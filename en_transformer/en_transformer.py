@@ -157,7 +157,7 @@ class EquivariantAttention(nn.Module):
         self.rel_coors_norm = CoorsNorm() if norm_rel_coors else nn.Identity()
 
         self.to_coors_out = nn.Sequential(
-            nn.Linear(heads, 1),
+            nn.Linear(heads, 1, bias = False),
             Rearrange('... () -> ...')
         )
 
@@ -186,16 +186,38 @@ class EquivariantAttention(nn.Module):
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
         rel_dist = rel_coors.norm(dim = -1, p = 2)
 
-        nbhd_indices = None
-        if num_nn > 0:
-            nbhd_ranking = rel_dist
+        # calculate neighborhood indices
 
+        nbhd_indices = None
+        nbhd_masks = None
+        nbhd_ranking = rel_dist
+
+        if exists(adj_mat):
+            if len(adj_mat.shape) == 2:
+                adj_mat = repeat(adj_mat, 'i j -> b i j', b = b)
+
+            self_mask = torch.eye(n, device = device).bool()
+            self_mask = rearrange(self_mask, 'i j -> () i j')
+            adj_mat.masked_fill_(self_mask, False)
+
+            max_adj_neighbors = adj_mat.long().sum(dim = -1).max().item() + 1
+
+            num_nn = max_adj_neighbors if only_sparse_neighbors else (num_nn + max_adj_neighbors)
+            valid_neighbor_radius = 0 if only_sparse_neighbors else valid_neighbor_radius
+
+            nbhd_ranking = nbhd_ranking.masked_fill(self_mask, -1.)
+            nbhd_ranking = nbhd_ranking.masked_fill(adj_mat, 0.)
+
+        if num_nn > 0:
             # make sure padding does not end up becoming neighbors
             if exists(mask):
                 ranking_mask = mask[:, :, None] * mask[:, None, :]
                 nbhd_ranking = nbhd_ranking.masked_fill(~ranking_mask, 1e5)
 
-            nbhd_indices = nbhd_ranking.topk(num_nn, dim = -1, largest = False).indices
+            nbhd_values, nbhd_indices = nbhd_ranking.topk(num_nn, dim = -1, largest = False)
+            nbhd_masks = nbhd_values <= valid_neighbor_radius
+
+        # calculate relative distance and optionally fourier encode
 
         rel_dist = rearrange(rel_dist, 'b i j -> b i j ()')
 
@@ -241,7 +263,9 @@ class EquivariantAttention(nn.Module):
                 k_mask = batched_index_select(k_mask, nbhd_indices, dim = 2)
 
             k_mask = rearrange(k_mask, 'b i j -> b () i j')
+
             mask = q_mask * k_mask
+            mask &= nbhd_masks
 
         # expand queries and keys for concatting
 

@@ -67,6 +67,32 @@ def test_equivariance_with_nearest_neighbors():
     assert torch.allclose(feats1, feats2, atol = 1e-6), 'type 0 features are invariant'
     assert torch.allclose(coors1, (coors2 @ R + T), atol = 1e-6), 'type 1 features are equivariant'
 
+def test_equivariance_with_sparse_neighbors():
+    model = EnTransformer(
+        dim = 512,
+        depth = 1,
+        heads = 4,
+        dim_head = 32,
+        fourier_features = 2,
+        num_nearest_neighbors = 0,
+        only_sparse_neighbors = True
+    )
+
+    R = rot(*torch.rand(3))
+    T = torch.randn(1, 1, 3)
+
+    feats = torch.randn(1, 16, 512)
+    coors = torch.randn(1, 16, 3)
+
+    i = torch.arange(feats.shape[1])
+    adj_mat = (i[:, None] <= (i[None, :] + 1)) & (i[:, None] >= (i[None, :] - 1))
+
+    feats1, coors1 = model(feats, coors @ R + T, adj_mat = adj_mat)
+    feats2, coors2 = model(feats, coors, adj_mat = adj_mat)
+
+    assert torch.allclose(feats1, feats2, atol = 1e-6), 'type 0 features are invariant'
+    assert torch.allclose(coors1, (coors2 @ R + T), atol = 1e-6), 'type 1 features are equivariant'
+
 def test_depth():
     model = EnTransformer(
         dim = 8,

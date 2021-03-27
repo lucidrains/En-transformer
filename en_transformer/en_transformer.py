@@ -37,14 +37,20 @@ def fourier_encode_dist(x, num_encodings = 4, include_self = True):
 
 # classes
 
-class Residual(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
+# this follows the same strategy for normalization as done in SE3 Transformers
+# https://github.com/lucidrains/se3-transformer-pytorch/blob/main/se3_transformer_pytorch/se3_transformer_pytorch.py#L95
 
-    def forward(self, feats, coors, **kwargs):
-        feats_out, coors_delta = self.fn(feats, coors, **kwargs)
-        return feats + feats_out, coors + coors_delta
+class CoorsNorm(nn.Module):
+    def __init__(self, eps = 1e-8):
+        super().__init__()
+        self.eps = eps
+        self.fn = nn.Sequential(nn.LayerNorm(1), nn.GELU())
+
+    def forward(self, coors):
+        norm = coors.norm(dim = -1, keepdim = True)
+        normed_coors = coors / norm.clamp(min = self.eps)
+        phase = self.fn(norm)
+        return (phase * normed_coors)
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -56,6 +62,15 @@ class PreNorm(nn.Module):
         feats = self.norm(feats)
         feats, coors = self.fn(feats, coors, **kwargs)
         return feats, coors
+
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, feats, coors, **kwargs):
+        feats_out, coors_delta = self.fn(feats, coors, **kwargs)
+        return feats + feats_out, coors + coors_delta
 
 class GEGLU(nn.Module):
     def forward(self, x):
@@ -94,11 +109,15 @@ class EquivariantAttention(nn.Module):
         norm_rel_coors = False,
         norm_coor_weights = False,
         num_nearest_neighbors = 0,
+        only_sparse_neighbors = False,
+        valid_neighbor_radius = float('inf'),
         init_eps = 1e-3
     ):
         super().__init__()
         self.fourier_features = fourier_features
         self.num_nearest_neighbors = num_nearest_neighbors
+        self.only_sparse_neighbors = only_sparse_neighbors
+        self.valid_neighbor_radius = valid_neighbor_radius
 
         attn_inner_dim = heads * dim_head
         self.heads = heads
@@ -136,7 +155,7 @@ class EquivariantAttention(nn.Module):
             nn.TanH() if norm_coor_weights else nn.Identity()
         )
 
-        self.norm_rel_coors = norm_rel_coors
+        self.rel_coors_norm = CoorsNorm() if norm_rel_coors else nn.Identity()
 
         self.init_eps = init_eps
         self.apply(self.init_)
@@ -150,23 +169,29 @@ class EquivariantAttention(nn.Module):
         feats,
         coors,
         edges = None,
-        mask = None
+        mask = None,
+        adj_mat = None
     ):
-        b, n, d, h, fourier_features, num_nn, device = *feats.shape, self.heads, self.fourier_features, self.num_nearest_neighbors, feats.device
+        b, n, d, h, fourier_features, num_nn, only_sparse_neighbors, valid_neighbor_radius, device = *feats.shape, self.heads, self.fourier_features, self.num_nearest_neighbors, self.only_sparse_neighbors, self.valid_neighbor_radius, feats.device
+
+        assert not (only_sparse_neighbors and not exists(adj_mat)), 'adjacency matrix must be passed in if only_sparse_neighbors is turned on'
+
+        if exists(mask):
+            num_nodes = mask.sum(dim = -1)
 
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
         rel_dist = rel_coors.norm(dim = -1, p = 2)
 
         nbhd_indices = None
         if num_nn > 0:
-            ranking = rel_dist
+            nbhd_ranking = rel_dist
 
             # make sure padding does not end up becoming neighbors
             if exists(mask):
                 ranking_mask = mask[:, :, None] * mask[:, None, :]
-                ranking = ranking.masked_fill(~ranking_mask, 1e5)
+                nbhd_ranking = nbhd_ranking.masked_fill(~ranking_mask, 1e5)
 
-            nbhd_indices = ranking.topk(num_nn, dim = -1, largest = False).indices
+            nbhd_indices = nbhd_ranking.topk(num_nn, dim = -1, largest = False).indices
 
         rel_dist = rearrange(rel_dist, 'b i j -> b i j ()')
 
@@ -236,9 +261,7 @@ class EquivariantAttention(nn.Module):
             coor_mask = rearrange(mask, 'b () i j -> b i j')
             coor_weights.masked_fill_(~coor_mask, 0.)
 
-        if self.norm_rel_coors:
-            rel_coors = F.normalize(rel_coors, dim = -1, p = 2)
-
+        rel_coors = self.rel_coors_norm(rel_coors)
         coors_out = einsum('b i j, b i j c -> b i c', coor_weights, rel_coors)
 
         # derive attention
@@ -274,6 +297,8 @@ class EnTransformer(nn.Module):
         m_dim = 16,
         fourier_features = 4,
         num_nearest_neighbors = 0,
+        only_sparse_neighbors = False,
+        valid_neighbor_radius = float('inf'),
         norm_rel_coors = False,
         norm_coor_weights = False,
         init_eps = 1e-3
@@ -284,7 +309,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights, num_nearest_neighbors = num_nearest_neighbors, init_eps = init_eps))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights, num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 
@@ -295,7 +320,8 @@ class EnTransformer(nn.Module):
         feats,
         coors,
         edges = None,
-        mask = None
+        mask = None,
+        adj_mat = None
     ):
         if exists(self.token_emb):
             feats = self.token_emb(feats)
@@ -303,7 +329,7 @@ class EnTransformer(nn.Module):
         # main network
 
         for attn, ff in self.layers:
-            feats, coors = attn(feats, coors, edges = edges, mask = mask)
+            feats, coors = attn(feats, coors, edges = edges, mask = mask, adj_mat = adj_mat)
             feats, coors = ff(feats, coors)
 
         return feats, coors

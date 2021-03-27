@@ -46,22 +46,11 @@ class Residual(nn.Module):
         feats_out, coors_delta = self.fn(feats, coors, **kwargs)
         return feats + feats_out, coors + coors_delta
 
-class RMSNorm(nn.Module):
-    def __init__(self, dim, eps = 1e-8):
-        super().__init__()
-        self.scale = dim ** -0.5
-        self.eps = eps
-        self.g = nn.Parameter(torch.ones(dim))
-
-    def forward(self, x):
-        norm = torch.norm(x, dim = -1, keepdim = True) * self.scale
-        return x / norm.clamp(min = self.eps) * self.g
-
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.norm = RMSNorm(dim)
+        self.norm = nn.LayerNorm(dim)
 
     def forward(self, feats, coors, **kwargs):
         feats = self.norm(feats)
@@ -101,7 +90,7 @@ class EquivariantAttention(nn.Module):
         heads = 4,
         edge_dim = 0,
         m_dim = 16,
-        fourier_features = 0,
+        fourier_features = 4,
         norm_rel_coors = False,
         norm_coor_weights = False,
         num_nearest_neighbors = 0,
@@ -116,7 +105,14 @@ class EquivariantAttention(nn.Module):
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
         self.to_out = nn.Linear(attn_inner_dim, dim)
 
-        edge_input_dim = (fourier_features * 2) + (dim_head * 2) + edge_dim + 1
+        pos_dim = (fourier_features * 2) + 1
+        edge_input_dim = dim_head + edge_dim
+
+        self.to_pos_emb = nn.Sequential(
+            nn.Linear(pos_dim, dim_head * 2),
+            nn.ReLU(),
+            nn.Linear(dim_head * 2, dim_head)
+        )
 
         self.edge_mlp = nn.Sequential(
             nn.Linear(edge_input_dim, edge_input_dim * 2),
@@ -198,6 +194,13 @@ class EquivariantAttention(nn.Module):
             rel_coors = batched_index_select(rel_coors, nbhd_indices, dim = 2)
         else:
             k = repeat(k, 'b h j d -> b h n j d', n = n)
+            v = repeat(v, 'b h j d -> b h n j d', n = n)
+
+        rel_dist_pos_emb = self.to_pos_emb(rel_dist)
+
+        # inject position into values
+
+        v = v + rel_dist_pos_emb
 
         # prepare mask
 
@@ -215,7 +218,7 @@ class EquivariantAttention(nn.Module):
 
         q = repeat(q, 'b h i d -> b h i n d', n = j)
 
-        edge_input = torch.cat((q, k, rel_dist), dim = -1)
+        edge_input = (q - k) + rel_dist_pos_emb
 
         if exists(edges):
             if exists(nbhd_indices):
@@ -250,8 +253,7 @@ class EquivariantAttention(nn.Module):
 
         # weighted sum of values and combine heads
 
-        aggregate_einsum_note = 'b h i j, b h j d -> b h i d' if not exists(nbhd_indices) else 'b h i j, b h i j d -> b h i d'
-        out = einsum(aggregate_einsum_note, attn, v)
+        out = einsum('b h i j, b h i j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
         out = self.to_out(out)
 

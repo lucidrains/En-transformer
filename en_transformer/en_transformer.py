@@ -107,7 +107,6 @@ class EquivariantAttention(nn.Module):
         m_dim = 16,
         fourier_features = 4,
         norm_rel_coors = False,
-        norm_coor_weights = False,
         num_nearest_neighbors = 0,
         only_sparse_neighbors = False,
         valid_neighbor_radius = float('inf'),
@@ -330,7 +329,6 @@ class EnTransformer(nn.Module):
         only_sparse_neighbors = False,
         valid_neighbor_radius = float('inf'),
         norm_rel_coors = False,
-        norm_coor_weights = False,
         init_eps = 1e-3
     ):
         super().__init__()
@@ -339,7 +337,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  norm_coor_weights = norm_coor_weights, num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

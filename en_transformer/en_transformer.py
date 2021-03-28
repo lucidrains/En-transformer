@@ -183,13 +183,13 @@ class EquivariantAttention(nn.Module):
             num_nodes = mask.sum(dim = -1)
 
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
-        rel_dist = rel_coors.norm(dim = -1, p = 2)
+        rel_dist = (rel_coors ** 2).sum(dim = -1)
 
         # calculate neighborhood indices
 
         nbhd_indices = None
         nbhd_masks = None
-        nbhd_ranking = rel_dist
+        nbhd_ranking = rel_dist.sqrt()
 
         if exists(adj_mat):
             if len(adj_mat.shape) == 2:

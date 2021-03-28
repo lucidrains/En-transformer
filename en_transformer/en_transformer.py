@@ -327,6 +327,7 @@ class EnTransformer(nn.Module):
         num_tokens = None,
         dim_head = 64,
         heads = 8,
+        num_edge_tokens = None,
         edge_dim = 0,
         m_dim = 16,
         fourier_features = 4,
@@ -343,6 +344,7 @@ class EnTransformer(nn.Module):
         assert not (exists(num_adj_degrees) and num_adj_degrees < 1), 'make sure adjacent degrees is greater than 1'
 
         self.token_emb = nn.Embedding(num_tokens, dim) if exists(num_tokens) else None
+        self.edge_emb = nn.Embedding(num_edge_tokens, edge_dim) if exists(num_edge_tokens) else None
 
         self.num_adj_degrees = num_adj_degrees
         self.adj_emb = nn.Embedding(num_adj_degrees + 1, adj_dim) if exists(num_adj_degrees) and adj_dim > 0 else None
@@ -369,6 +371,10 @@ class EnTransformer(nn.Module):
 
         if exists(self.token_emb):
             feats = self.token_emb(feats)
+
+        if exists(self.edge_emb):
+            assert exists(edges), 'edges must be passed in as (batch x seq x seq) indicating edge type'
+            edges = self.edge_emb(edges)
 
         if exists(self.num_adj_degrees):
             assert exists(adj_mat), 'adjacency matrix must be passed in (keyword argument adj_mat)'

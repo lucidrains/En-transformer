@@ -26,8 +26,9 @@ transformer = EnTransformer(
     heads = 4,
     depth = 4,
     norm_rel_coors = True,
-    num_nearest_neighbors = 0,
-    only_sparse_neighbors = True
+    only_sparse_neighbors = True,
+    num_adj_degrees = 3,
+    adj_dim = 4
 )
 
 data = scn.load(
@@ -52,10 +53,9 @@ for _ in range(10000):
         masks = masks.cuda().bool()
 
         l = seqs.shape[1]
-        coords = rearrange(coords, 'b (l s) c -> b l s c', s = 14)
+        coords = rearrange(coords, 'b (l s) c -> b l s c', s=14)
 
-        # keeping only the backbone coordinates
-
+        # Keeping only the backbone coordinates
         coords = coords[:, :, 0:3, :]
         coords = rearrange(coords, 'b l s c -> b (l s) c')
 
@@ -66,7 +66,6 @@ for _ in range(10000):
 
         i = torch.arange(seq.shape[-1]).to(seq)
         adj_mat = (i[:, None] >= (i[None, :] - 1)) & (i[:, None] <= (i[None, :] + 1))
-        adj_mat = (adj_mat.float() @ adj_mat.float()) > 0 # get second degree neighbors as well
 
         feats, denoised_coords = transformer(seq, noised_coords, mask = masks, adj_mat = adj_mat)
 

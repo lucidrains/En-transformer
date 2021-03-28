@@ -327,17 +327,25 @@ class EnTransformer(nn.Module):
         fourier_features = 4,
         num_nearest_neighbors = 0,
         only_sparse_neighbors = False,
+        num_adj_degrees = None,
+        adj_dim = 0,
         valid_neighbor_radius = float('inf'),
         norm_rel_coors = False,
         init_eps = 1e-3
     ):
         super().__init__()
+        assert not (exists(num_adj_degrees) and num_adj_degrees < 1), 'make sure adjacent degrees is greater than 1'
+
         self.token_emb = nn.Embedding(num_tokens, dim) if exists(num_tokens) else None
+
+        self.num_adj_degrees = num_adj_degrees
+        self.adj_emb = nn.Embedding(num_adj_degrees + 1, adj_dim) if exists(num_adj_degrees) and adj_dim > 0 else None
+        adj_dim = adj_dim if exists(num_adj_degrees) else 0
 
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = edge_dim, fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 
@@ -351,8 +359,28 @@ class EnTransformer(nn.Module):
         mask = None,
         adj_mat = None
     ):
+        b = feats.shape[0]
+
         if exists(self.token_emb):
             feats = self.token_emb(feats)
+
+        if exists(self.num_adj_degrees):
+            if len(adj_mat.shape) == 2:
+                adj_mat = repeat(adj_mat.clone(), 'i j -> b i j', b = b)
+
+            adj_indices = adj_mat.clone().long()
+
+            for ind in range(self.num_adj_degrees - 1):
+                degree = ind + 2
+
+                next_degree_adj_mat = (adj_mat.float() @ adj_mat.float()) > 0
+                next_degree_mask = (next_degree_adj_mat.float() - adj_mat.float()).bool()
+                adj_indices.masked_fill_(next_degree_mask, degree)
+                adj_mat = next_degree_adj_mat.clone()
+
+            if exists(self.adj_emb):
+                adj_emb = self.adj_emb(adj_indices)
+                edges = torch.cat((edges, adj_emb), dim = -1) if exists(edges) else adj_emb
 
         # main network
 

@@ -46,7 +46,9 @@ model = EnTransformer(
     dim_head = 32,
     fourier_features = 2,
     num_nearest_neighbors = 0,
-    only_sparse_neighbors = True
+    only_sparse_neighbors = True,    # must be set to true
+    num_adj_degrees = 3,             # the number of degrees to derive from 1st degree neighbors passed in
+    adj_dim = 8                      # whether to pass the adjacency degree information as an edge embedding
 )
 
 feats = torch.randn(1, 16, 512)

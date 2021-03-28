@@ -109,6 +109,7 @@ class EquivariantAttention(nn.Module):
         norm_rel_coors = False,
         num_nearest_neighbors = 0,
         only_sparse_neighbors = False,
+        coor_attention = False,
         valid_neighbor_radius = float('inf'),
         init_eps = 1e-3
     ):
@@ -155,6 +156,8 @@ class EquivariantAttention(nn.Module):
 
         self.rel_coors_norm = CoorsNorm() if norm_rel_coors else nn.Identity()
 
+        self.coor_attention = coor_attention
+
         self.to_coors_out = nn.Sequential(
             nn.Linear(heads, 1, bias = False),
             Rearrange('... () -> ...')
@@ -183,13 +186,13 @@ class EquivariantAttention(nn.Module):
             num_nodes = mask.sum(dim = -1)
 
         rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
-        rel_dist = (rel_coors ** 2).sum(dim = -1)
+        rel_dist = rel_coors.norm(p = 2, dim = -1)
 
         # calculate neighborhood indices
 
         nbhd_indices = None
         nbhd_masks = None
-        nbhd_ranking = rel_dist.sqrt()
+        nbhd_ranking = rel_dist
 
         if exists(adj_mat):
             if len(adj_mat.shape) == 2:
@@ -284,8 +287,10 @@ class EquivariantAttention(nn.Module):
         coor_weights = self.coors_mlp(m_ij)
 
         if exists(mask):
-            max_neg_value = -torch.finfo(coor_weights.dtype).max
-            coor_weights.masked_fill_(~mask, max_neg_value)
+            mask_value = -torch.finfo(coor_weights.dtype).max if self.coor_attention else 0.
+            coor_weights.masked_fill_(~mask, mask_value)
+
+        if self.coor_attention:
             coor_weights = coor_weights.softmax(dim = -1)
 
         rel_coors = self.rel_coors_norm(rel_coors)
@@ -329,6 +334,7 @@ class EnTransformer(nn.Module):
         only_sparse_neighbors = False,
         num_adj_degrees = None,
         adj_dim = 0,
+        coor_attention = False,
         valid_neighbor_radius = float('inf'),
         norm_rel_coors = False,
         init_eps = 1e-3
@@ -345,7 +351,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, coor_attention = coor_attention, init_eps = init_eps))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

@@ -269,7 +269,7 @@ class EquivariantAttention(nn.Module):
             mask = q_mask * k_mask
 
             if exists(nbhd_masks):
-                mask &= nbhd_masks
+                mask &= rearrange(nbhd_masks, 'b i j -> b () i j')
 
         # expand queries and keys for concatting
 

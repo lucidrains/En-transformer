@@ -88,6 +88,36 @@ adj_mat = (i[:, None] <= (i[None, :] + 1)) & (i[:, None] >= (i[None, :] - 1))
 feats_out, coors_out = model(atoms, coors, adj_mat = adj_mat) # (1, 16, 512), (1, 16, 3)
 ```
 
+## Edges
+
+If you need to pass in continuous edges
+
+```python
+import torch
+from en_transformer import EnTransformer
+from en_transformer.utils import rot
+
+model = EnTransformer(
+    dim = 512,
+    depth = 1,
+    heads = 4,
+    dim_head = 32,
+    edge_dim = 4,
+    fourier_features = 2,
+    num_nearest_neighbors = 0,
+    only_sparse_neighbors = True
+)
+
+feats = torch.randn(1, 16, 512)
+coors = torch.randn(1, 16, 3)
+edges = torch.randn(1, 16, 16, 4)
+
+i = torch.arange(feats.shape[1])
+adj_mat = (i[:, None] <= (i[None, :] + 1)) & (i[:, None] >= (i[None, :] - 1))
+
+feats1, coors1 = model(feats, coors, adj_mat = adj_mat, edges = edges)
+```
+
 ## Example
 
 To run a protein backbone coordinate denoising toy task, first install `sidechainnet`

@@ -367,7 +367,8 @@ class EnTransformer(nn.Module):
         coors,
         edges = None,
         mask = None,
-        adj_mat = None
+        adj_mat = None,
+        **kwargs
     ):
         b = feats.shape[0]
 

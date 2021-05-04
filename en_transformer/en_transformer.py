@@ -111,7 +111,8 @@ class EquivariantAttention(nn.Module):
         only_sparse_neighbors = False,
         coor_attention = False,
         valid_neighbor_radius = float('inf'),
-        init_eps = 1e-3
+        init_eps = 1e-3,
+        soft_edges = False
     ):
         super().__init__()
         self.fourier_features = fourier_features
@@ -139,6 +140,11 @@ class EquivariantAttention(nn.Module):
             nn.Linear(edge_input_dim * 2, m_dim),
             nn.ReLU()
         )
+
+        self.edge_gate = nn.Sequential(
+            nn.Linear(m_dim, 1),
+            nn.Sigmoid()
+        ) if soft_edges else None
 
         self.to_attn_mlp = nn.Sequential(
             nn.Linear(m_dim, m_dim * 4),
@@ -286,6 +292,9 @@ class EquivariantAttention(nn.Module):
 
         m_ij = self.edge_mlp(edge_input)
 
+        if exists(self.edge_gate):
+            m_ij = m_ij * self.edge_gate(m_ij)
+
         coor_weights = self.coors_mlp(m_ij)
 
         if exists(mask):
@@ -340,7 +349,8 @@ class EnTransformer(nn.Module):
         coor_attention = False,
         valid_neighbor_radius = float('inf'),
         norm_rel_coors = False,
-        init_eps = 1e-3
+        init_eps = 1e-3,
+        soft_edges = False
     ):
         super().__init__()
         assert not (exists(num_adj_degrees) and num_adj_degrees < 1), 'make sure adjacent degrees is greater than 1'
@@ -355,7 +365,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, coor_attention = coor_attention, init_eps = init_eps))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, coor_attention = coor_attention, init_eps = init_eps, soft_edges = soft_edges))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

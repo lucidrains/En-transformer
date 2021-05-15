@@ -11,8 +11,7 @@ def test_readme():
         dim_head = 64,
         heads = 8,
         edge_dim = 4,
-        fourier_features = 2,
-        num_nearest_neighbors = 6
+        neighbors = 6
     )
 
     feats = torch.randn(1, 32, 512)
@@ -29,7 +28,7 @@ def test_equivariance():
         dim = 512,
         depth = 1,
         edge_dim = 4,
-        fourier_features = 2
+        rel_pos_emb = True
     )
 
     R = rot(*torch.rand(3))
@@ -50,8 +49,7 @@ def test_equivariance_with_nearest_neighbors():
         dim = 512,
         depth = 1,
         edge_dim = 4,
-        fourier_features = 2,
-        num_nearest_neighbors = 5
+        neighbors = 5
     )
 
     R = rot(*torch.rand(3))
@@ -73,9 +71,9 @@ def test_equivariance_with_sparse_neighbors():
         depth = 1,
         heads = 4,
         dim_head = 32,
-        fourier_features = 2,
-        num_nearest_neighbors = 0,
-        only_sparse_neighbors = True
+        neighbors = 0,
+        only_sparse_neighbors = True,
+        num_adj_degrees = 1
     )
 
     R = rot(*torch.rand(3))
@@ -98,8 +96,7 @@ def test_depth():
         dim = 8,
         depth = 12,
         edge_dim = 4,
-        fourier_features = 2,
-        num_nearest_neighbors = 16
+        neighbors = 16
     )
 
     feats = torch.randn(1, 128, 8)

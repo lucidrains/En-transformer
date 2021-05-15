@@ -16,12 +16,11 @@ from en_transformer import EnTransformer
 
 model = EnTransformer(
     dim = 512,
-    depth = 4,                         # depth
-    dim_head = 64,                     # dimension per head
-    heads = 8,                         # number of heads
-    edge_dim = 4,                      # dimension of edge features
-    fourier_features = 2,              # num fourier features to append to relative distance which goes into the edge MLP
-    num_nearest_neighbors = 64         # only do attention between coordinates N nearest neighbors - set to 0 to turn off
+    depth = 4,             # depth
+    dim_head = 64,         # dimension per head
+    heads = 8,             # number of heads
+    edge_dim = 4,          # dimension of edge feature
+    neighbors = 64         # only do attention between coordinates N nearest neighbors - set to 0 to turn off
 )
 
 feats = torch.randn(1, 1024, 512)
@@ -40,15 +39,15 @@ import torch
 from en_transformer import EnTransformer
 
 model = EnTransformer(
-    num_tokens = 10,
-    num_edge_tokens = 5,
+    num_tokens = 10,       # number of unique nodes, say atoms
+    rel_pos_emb = True,    # set this to true if your sequence is not an unordered set. it will accelerate convergence
+    num_edge_tokens = 5,   # number of unique edges, say bond types
     dim = 128,
     edge_dim = 16,
     depth = 3,
     heads = 4,
     dim_head = 32,
-    fourier_features = 2,
-    num_nearest_neighbors = 8,
+    neighbors = 8
 )
 
 atoms = torch.randint(0, 10, (1, 16))    # 10 different types of atoms
@@ -70,8 +69,7 @@ model = EnTransformer(
     depth = 1,
     heads = 4,
     dim_head = 32,
-    fourier_features = 2,
-    num_nearest_neighbors = 0,
+    neighbors = 0,
     only_sparse_neighbors = True,    # must be set to true
     num_adj_degrees = 3,             # the number of degrees to derive from 1st degree neighbors passed in
     adj_dim = 8                      # whether to pass the adjacency degree information as an edge embedding
@@ -103,7 +101,6 @@ model = EnTransformer(
     heads = 4,
     dim_head = 32,
     edge_dim = 4,
-    fourier_features = 2,
     num_nearest_neighbors = 0,
     only_sparse_neighbors = True
 )

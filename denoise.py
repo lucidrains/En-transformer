@@ -12,7 +12,7 @@ torch.set_default_dtype(torch.float64)
 BATCH_SIZE = 1
 GRADIENT_ACCUMULATE_EVERY = 16
 
-def cycle(loader, len_thres = 500):
+def cycle(loader, len_thres = 200):
     while True:
         for data in loader:
             if data.seqs.shape[1] > len_thres:
@@ -21,14 +21,12 @@ def cycle(loader, len_thres = 500):
 
 transformer = EnTransformer(
     num_tokens = 21,
-    dim = 16,
-    dim_head = 32,
+    dim = 32,
+    dim_head = 64,
     heads = 4,
     depth = 4,
-    norm_rel_coors = True,
-    only_sparse_neighbors = True,
-    num_adj_degrees = 3,
-    adj_dim = 4
+    rel_pos_emb = True, # there is inherent order in the sequence (backbone atoms of amino acid chain)
+    neighbors = 16
 )
 
 data = scn.load(
@@ -53,9 +51,10 @@ for _ in range(10000):
         masks = masks.cuda().bool()
 
         l = seqs.shape[1]
-        coords = rearrange(coords, 'b (l s) c -> b l s c', s=14)
+        coords = rearrange(coords, 'b (l s) c -> b l s c', s = 14)
 
-        # Keeping only the backbone coordinates
+        # keeping only the backbone coordinates
+
         coords = coords[:, :, 0:3, :]
         coords = rearrange(coords, 'b l s c -> b (l s) c')
 
@@ -64,10 +63,7 @@ for _ in range(10000):
 
         noised_coords = coords + torch.randn_like(coords)
 
-        i = torch.arange(seq.shape[-1]).to(seq)
-        adj_mat = (i[:, None] >= (i[None, :] - 1)) & (i[:, None] <= (i[None, :] + 1))
-
-        feats, denoised_coords = transformer(seq, noised_coords, mask = masks, adj_mat = adj_mat)
+        feats, denoised_coords = transformer(seq, noised_coords, mask = masks)
 
         loss = F.mse_loss(denoised_coords[masks], coords[masks])
 

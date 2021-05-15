@@ -72,8 +72,7 @@ def test_equivariance_with_sparse_neighbors():
         heads = 4,
         dim_head = 32,
         neighbors = 0,
-        only_sparse_neighbors = True,
-        num_adj_degrees = 1
+        only_sparse_neighbors = True
     )
 
     R = rot(*torch.rand(3))

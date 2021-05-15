@@ -12,6 +12,9 @@ from einops.layers.torch import Rearrange
 def exists(val):
     return val is not None
 
+def default(val, d):
+    return val if exists(val) else d
+
 def safe_cat(arr, el, dim):
     if not exists(arr):
         return el
@@ -333,6 +336,9 @@ class EnTransformer(nn.Module):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
         assert not (exists(num_adj_degrees) and num_adj_degrees < 1), 'make sure adjacent degrees is greater than 1'
+
+        if only_sparse_neighbors:
+            num_adj_degrees = default(num_adj_degrees, 1)
 
         self.token_emb = nn.Embedding(num_tokens, dim) if exists(num_tokens) else None
         self.edge_emb = nn.Embedding(num_edge_tokens, edge_dim) if exists(num_edge_tokens) else None

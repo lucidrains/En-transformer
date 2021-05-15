@@ -246,9 +246,7 @@ class EquivariantAttention(nn.Module):
             if exists(nbhd_masks):
                 mask &= rearrange(nbhd_masks, 'b i j -> b () i j')
 
-        dim_head = q.shape[-1]
-
-        # expand queries and keys for concatting
+        # generate and apply rotary embeddings
 
         rot_null = torch.zeros_like(rel_dist)
 
@@ -271,7 +269,11 @@ class EquivariantAttention(nn.Module):
         k = apply_rotary_pos_emb(k, k_pos_emb)
         v = apply_rotary_pos_emb(v, k_pos_emb)
 
+        # calculate inner product for queries and keys
+
         qk = einsum('b h i d, b h i j d -> b h i j', q, k) * self.scale
+
+        # add edge information and pass through edges MLP if needed
 
         if exists(edges):
             if exists(nbhd_indices):
@@ -281,6 +283,8 @@ class EquivariantAttention(nn.Module):
             qk = torch.cat((qk, edges), dim = -1)
             qk = self.edge_mlp(qk)
             qk = rearrange(qk, 'b i j h -> b h i j')
+
+        # coordinate MLP and calculate coordinate updates
 
         coors_mlp_input = rearrange(qk, 'b h i j -> b i j h')
         coor_weights = self.coors_mlp(coors_mlp_input)

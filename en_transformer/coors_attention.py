@@ -153,6 +153,11 @@ class EquivariantAttention(nn.Module):
                 nn.Linear(coors_hidden_dim, heads)
             )
 
+        self.coors_gate = nn.Sequential(
+            nn.Linear(heads, heads),
+            nn.Tanh()
+        )
+
         self.norm_rel_coors = CoorsNorm()
 
         self.combine_coors_heads = nn.Sequential(
@@ -304,8 +309,13 @@ class EquivariantAttention(nn.Module):
             coor_weights.masked_fill_(~coor_mask, mask_value)
 
         coor_attn = coor_weights.softmax(dim = -2)
+
+        rel_coors_sign = rearrange(self.coors_gate(coors_mlp_input), 'b i j h -> b h i j ()')
+
         rel_coors = self.norm_rel_coors(rel_coors)
-        coors_out = einsum('b i j h, b i j c -> b i c h', coor_attn, rel_coors)
+        rel_coors = repeat(rel_coors, 'b i j c -> b h i j c', h = h) * rel_coors_sign
+
+        coors_out = einsum('b i j h, b h i j c -> b i c h', coor_attn, rel_coors)
 
         coors_out = self.combine_coors_heads(coors_out)
 

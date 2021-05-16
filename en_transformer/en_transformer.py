@@ -153,7 +153,6 @@ class EquivariantAttention(nn.Module):
         self.rotary_emb = SinusoidalEmbeddings(dim_head // 2)
         self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2) if rel_pos_emb else None
 
-        self.post_aggregate_norm = nn.LayerNorm(dim_head)
         self.init_eps = init_eps
         self.apply(self.init_)
 

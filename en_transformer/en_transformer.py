@@ -18,10 +18,23 @@ def max_neg_value(t):
 def default(val, d):
     return val if exists(val) else d
 
-def safe_cat(arr, el, dim):
-    if not exists(arr):
-        return el
-    return torch.cat((arr, el), dim = dim)
+def broadcat(tensors, dim = -1):
+    num_tensors = len(tensors)
+    shape_lens = set(list(map(lambda t: len(t.shape), tensors)))
+    assert len(shape_lens) == 1, 'tensors must all have the same number of dimensions'
+    shape_len = list(shape_lens)[0]
+
+    dim = (dim + shape_len) if dim < 0 else dim
+    dims = list(zip(*map(lambda t: list(t.shape), tensors)))
+
+    expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
+    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), 'invalid dimensions for broadcastable concatentation'
+    max_dims = list(map(lambda t: (t[0], max(t[1])), expandable_dims))
+    expanded_dims = list(map(lambda t: (t[0], (t[1],) * num_tensors), max_dims))
+    expanded_dims.insert(dim, (dim, dims[dim]))
+    expandable_shapes = list(zip(*map(lambda t: t[1], expanded_dims)))
+    tensors = list(map(lambda t: t[0].expand(*t[1]), zip(tensors, expandable_shapes)))
+    return torch.cat(tensors, dim = dim)
 
 def batched_index_select(values, indices, dim = 1):
     value_dims = values.shape[(dim + 1):]
@@ -263,17 +276,17 @@ class EquivariantAttention(nn.Module):
         q_pos_emb_rel_dist = self.rotary_emb(torch.zeros(n, device = device))
         k_pos_emb_rel_dist = self.rotary_emb(rel_dist * 1e2)
 
-        q_pos_emb = repeat(q_pos_emb_rel_dist, 'i d -> b () i d', b = b)
-        k_pos_emb = repeat(k_pos_emb_rel_dist, 'b i j d -> b () i j d')
+        q_pos_emb = rearrange(q_pos_emb_rel_dist, 'i d -> () () i d')
+        k_pos_emb = rearrange(k_pos_emb_rel_dist, 'b i j d -> b () i j d')
 
         if exists(self.rotary_emb_seq):
             pos_emb = self.rotary_emb_seq(torch.arange(n, device = device))
 
-            q_pos_emb_seq = repeat(pos_emb, 'n d -> b () n d', b = b)
-            k_pos_emb_seq = repeat(pos_emb, 'n d -> b () n j d', b = b, j = j)
+            q_pos_emb_seq = rearrange(pos_emb, 'n d -> () () n d')
+            k_pos_emb_seq = rearrange(pos_emb, 'n d -> () () n () d')
 
-            q_pos_emb = safe_cat(q_pos_emb, q_pos_emb_seq, dim = -1)
-            k_pos_emb = safe_cat(k_pos_emb, k_pos_emb_seq, dim = -1)
+            q_pos_emb = broadcat((q_pos_emb, q_pos_emb_seq), dim = -1)
+            k_pos_emb = broadcat((k_pos_emb, k_pos_emb_seq), dim = -1)
 
         q = apply_rotary_pos_emb(q, q_pos_emb)
         k = apply_rotary_pos_emb(k, k_pos_emb)

@@ -12,6 +12,9 @@ from einops.layers.torch import Rearrange
 def exists(val):
     return val is not None
 
+def max_neg_value(t):
+    return -torch.finfo(t.dtype).max
+
 def default(val, d):
     return val if exists(val) else d
 
@@ -141,18 +144,22 @@ class EquivariantAttention(nn.Module):
 
             self.coors_mlp = nn.Sequential(
                 nn.GELU(),
-                nn.Linear(heads, 1),
-                Rearrange('... () -> ...')
+                nn.Linear(heads, heads)
             )
         else:
             self.coors_mlp = nn.Sequential(
                 nn.Linear(heads, coors_hidden_dim),
                 nn.GELU(),
-                nn.Linear(coors_hidden_dim, 1),
-                Rearrange('... () -> ...')
+                nn.Linear(coors_hidden_dim, heads)
             )
 
-        self.rel_coors_norm = CoorsNorm()
+        self.coors_gate = nn.Sequential(
+            nn.Linear(heads, heads),
+            nn.Tanh()
+        )
+
+        self.norm_rel_coors = CoorsNorm()
+        self.coors_combine = nn.Parameter(torch.randn(heads))
 
         self.rotary_emb = SinusoidalEmbeddings(dim_head // 2)
         self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2) if rel_pos_emb else None
@@ -274,7 +281,7 @@ class EquivariantAttention(nn.Module):
 
         # calculate inner product for queries and keys
 
-        qk = einsum('b h i d, b h i j d -> b h i j', q, k) * self.scale
+        qk = einsum('b h i d, b h i j d -> b h i j', q, k) * (self.scale if not exists(edges) else 1)
 
         # add edge information and pass through edges MLP if needed
 
@@ -293,19 +300,30 @@ class EquivariantAttention(nn.Module):
         coor_weights = self.coors_mlp(coors_mlp_input)
 
         if exists(mask):
-            coor_weights.masked_fill_(~mask.squeeze(1), 0.)
+            mask_value = max_neg_value(coor_weights)
+            coor_mask = repeat(mask, 'b () i j -> b i j ()')
+            coor_weights.masked_fill_(~coor_mask, mask_value)
 
-        rel_coors = self.rel_coors_norm(rel_coors)
+        coor_attn = coor_weights.softmax(dim = -2)
 
-        coors_out = einsum('b i j, b i j c -> b i c', coor_weights, rel_coors)
+        rel_coors_sign = self.coors_gate(coors_mlp_input)
+        rel_coors_sign = rearrange(rel_coors_sign, 'b i j h -> b i j () h')
+
+        rel_coors = self.norm_rel_coors(rel_coors)
+
+        rel_coors = repeat(rel_coors, 'b i j c -> b i j c h', h = h)
+
+        rel_coors = rel_coors * rel_coors_sign
+
+        coors_out = einsum('b i j h, b i j c h, h -> b i c', coor_attn, rel_coors, self.coors_combine)
 
         # derive attention
 
         sim = qk.clone()
 
         if exists(mask):
-            max_neg_value = -torch.finfo(sim.dtype).max
-            sim.masked_fill_(~mask, max_neg_value)
+            mask_value = max_neg_value(sim)
+            sim.masked_fill_(~mask, mask_value)
 
         attn = sim.softmax(dim = -1)
 

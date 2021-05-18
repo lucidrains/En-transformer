@@ -112,7 +112,8 @@ class EquivariantAttention(nn.Module):
         coor_attention = False,
         valid_neighbor_radius = float('inf'),
         init_eps = 1e-3,
-        soft_edges = False
+        soft_edges = False,
+        rel_coors_sign_gating = False
     ):
         super().__init__()
         self.fourier_features = fourier_features
@@ -159,6 +160,11 @@ class EquivariantAttention(nn.Module):
             nn.Linear(m_dim * 4, 1),
             Rearrange('... () -> ...')
         )
+
+        self.coors_gate = nn.Sequential(
+            nn.Linear(heads, heads),
+            nn.Tanh()
+        ) if rel_coors_sign_gating else None
 
         self.rel_coors_norm = CoorsNorm() if norm_rel_coors else nn.Identity()
 
@@ -296,6 +302,7 @@ class EquivariantAttention(nn.Module):
             m_ij = m_ij * self.edge_gate(m_ij)
 
         coor_weights = self.coors_mlp(m_ij)
+        coors_gate_input = rearrange(coor_weights, 'b h i j -> b i j h')
 
         if exists(mask):
             mask_value = -torch.finfo(coor_weights.dtype).max if self.coor_attention else 0.
@@ -305,8 +312,14 @@ class EquivariantAttention(nn.Module):
             coor_weights = coor_weights.softmax(dim = -1)
 
         rel_coors = self.rel_coors_norm(rel_coors)
+        rel_coors = repeat(rel_coors, 'b i j c -> b i j c h', h = h)
 
-        coors_out = einsum('b h i j, b i j c -> b i c h', coor_weights, rel_coors)
+        if exists(self.coors_gate):
+            rel_coors_signs = self.coors_gate(coors_gate_input)
+            rel_coors_signs = rearrange(rel_coors_signs, 'b i j h -> b i j () h')
+            rel_coors = rel_coors * rel_coors_signs
+
+        coors_out = einsum('b h i j, b i j c h -> b i c h', coor_weights, rel_coors)
         coors_out = self.to_coors_out(coors_out)
 
         # derive attention
@@ -349,6 +362,7 @@ class EnTransformer(nn.Module):
         coor_attention = False,
         valid_neighbor_radius = float('inf'),
         norm_rel_coors = False,
+        rel_coors_sign_gating = False,
         init_eps = 1e-3,
         soft_edges = False
     ):
@@ -365,7 +379,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, coor_attention = coor_attention, init_eps = init_eps, soft_edges = soft_edges))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, m_dim = m_dim, edge_dim = (edge_dim + adj_dim), fourier_features = fourier_features, norm_rel_coors = norm_rel_coors,  num_nearest_neighbors = num_nearest_neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, coor_attention = coor_attention, init_eps = init_eps, soft_edges = soft_edges, rel_coors_sign_gating = rel_coors_sign_gating))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

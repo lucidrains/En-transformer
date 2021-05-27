@@ -113,6 +113,40 @@ class FeedForward(nn.Module):
     def forward(self, feats, coors):
         return self.net(feats), 0
 
+class GlobalLinearAttention(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        dim_head,
+        heads
+    ):
+        super().__init__()
+        inner_dim = dim_head * heads
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_out = nn.Linear(inner_dim, dim)
+
+    def forward(self, feats, coors, mask = None):
+        h = self.heads
+        q, k, v = self.to_qkv(feats).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
+
+        q = q.softmax(dim=-1)
+        k = k.softmax(dim=-2)
+
+        q = q * self.scale
+
+        if exists(mask):
+            mask = rearrange(mask, 'b n -> b () n ()')
+            v.masked_fill_(~mask, 0.)
+
+        context = einsum('b h n d, b h n e -> b h d e', k, v)
+        out = einsum('b h d e, b h n d -> b h n e', context, q)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        return self.to_out(out), 0
+
 class EquivariantAttention(nn.Module):
     def __init__(
         self,
@@ -371,7 +405,8 @@ class EnTransformer(nn.Module):
         adj_dim = 0,
         valid_neighbor_radius = float('inf'),
         init_eps = 1e-3,
-        norm_rel_coors = True
+        norm_rel_coors = True,
+        global_linear_attn_every = 0
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -388,13 +423,17 @@ class EnTransformer(nn.Module):
         adj_dim = adj_dim if exists(num_adj_degrees) else 0
 
         self.layers = nn.ModuleList([])
-        for _ in range(depth):
+
+        global_linear_attn_every = default(global_linear_attn_every, 0)
+
+        for ind in range(depth):
+            add_global = global_linear_attn_every > 0 and (ind % global_linear_attn_every) == 0
+
             self.layers.append(nn.ModuleList([
+                Residual(PreNorm(dim, GlobalLinearAttention(dim = dim, heads = heads, dim_head = dim_head))) if add_global else None,
                 Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
-
-        self.eighbors = neighbors
 
     def forward(
         self,
@@ -438,7 +477,10 @@ class EnTransformer(nn.Module):
 
         # main network
 
-        for attn, ff in self.layers:
+        for global_attn, attn, ff in self.layers:
+            if exists(global_attn):
+                feats, coors = global_attn(feats, coors, mask = mask)
+
             feats, coors = attn(feats, coors, edges = edges, mask = mask, adj_mat = adj_mat)
             feats, coors = ff(feats, coors)
 

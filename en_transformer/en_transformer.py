@@ -133,13 +133,16 @@ class GlobalLinearAttention(nn.Module):
         q, k, v = self.to_qkv(feats).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
+        if exists(mask):
+            mask = rearrange(mask, 'b n -> b () n ()')
+            k.masked_fill_(~mask, -torch.finfo(k.dtype).max)
+
         q = q.softmax(dim = -1)
         k = k.softmax(dim = -2)
 
         q = q * self.scale
 
         if exists(mask):
-            mask = rearrange(mask, 'b n -> b () n ()')
             v.masked_fill_(~mask, 0.)
 
         context = einsum('b h n d, b h n e -> b h d e', k, v)

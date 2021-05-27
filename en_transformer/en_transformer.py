@@ -128,6 +128,7 @@ class EquivariantAttention(nn.Module):
         init_eps = 1e-3,
         rel_pos_emb = None,
         edge_mlp_mult = 2,
+        norm_rel_coors = True,
         coor_attention = False
     ):
         super().__init__()
@@ -171,7 +172,7 @@ class EquivariantAttention(nn.Module):
             nn.Tanh()
         )
 
-        self.norm_rel_coors = CoorsNorm()
+        self.norm_rel_coors = CoorsNorm() if norm_rel_coors else nn.Identity()
         self.coors_combine = nn.Parameter(torch.randn(heads))
 
         self.rotary_emb = SinusoidalEmbeddings(dim_head // 2)
@@ -369,7 +370,8 @@ class EnTransformer(nn.Module):
         num_adj_degrees = None,
         adj_dim = 0,
         valid_neighbor_radius = float('inf'),
-        init_eps = 1e-3
+        init_eps = 1e-3,
+        norm_rel_coors = True
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -388,7 +390,7 @@ class EnTransformer(nn.Module):
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

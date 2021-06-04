@@ -61,13 +61,13 @@ class CoorsNorm(nn.Module):
     def __init__(self, eps = 1e-8):
         super().__init__()
         self.eps = eps
-        self.fn = nn.LayerNorm(1)
+        self.scale = nn.Parameter(torch.ones(1))
+        self.bias = nn.Parameter(torch.zeros(1))
 
     def forward(self, coors):
         norm = coors.norm(dim = -1, keepdim = True)
         normed_coors = coors / norm.clamp(min = self.eps)
-        phase = self.fn(norm)
-        return (phase * normed_coors)
+        return normed_coors * self.scale + self.bias
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -165,8 +165,7 @@ class EquivariantAttention(nn.Module):
         init_eps = 1e-3,
         rel_pos_emb = None,
         edge_mlp_mult = 2,
-        norm_rel_coors = True,
-        coor_attention = False
+        norm_rel_coors = True
     ):
         super().__init__()
         self.scale = dim_head ** -0.5

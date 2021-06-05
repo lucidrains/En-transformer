@@ -58,18 +58,16 @@ def batched_index_select(values, indices, dim = 1):
 # https://github.com/lucidrains/se3-transformer-pytorch/blob/main/se3_transformer_pytorch/se3_transformer_pytorch.py#L95
 
 class CoorsNorm(nn.Module):
-    def __init__(self, eps = 1e-8, scale_init = 1., bias_init = 0.):
+    def __init__(self, eps = 1e-8, scale_init = 1.):
         super().__init__()
         self.eps = eps
         scale = torch.zeros(1).fill_(scale_init)
-        bias = torch.zeros(1).fill_(bias_init)
         self.scale = nn.Parameter(scale)
-        self.bias = nn.Parameter(bias)
 
     def forward(self, coors):
         norm = coors.norm(dim = -1, keepdim = True)
         normed_coors = coors / norm.clamp(min = self.eps)
-        return normed_coors * self.scale + self.bias
+        return normed_coors
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -181,8 +179,7 @@ class EquivariantAttention(nn.Module):
         rel_pos_emb = None,
         edge_mlp_mult = 2,
         norm_rel_coors = True,
-        norm_coors_scale_init = 1.,
-        norm_coors_bias_init = 0.
+        norm_coors_scale_init = 1.
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -225,7 +222,7 @@ class EquivariantAttention(nn.Module):
             nn.Tanh()
         )
 
-        self.norm_rel_coors = CoorsNorm(scale_init = norm_coors_scale_init, bias_init = norm_coors_bias_init) if norm_rel_coors else nn.Identity()
+        self.norm_rel_coors = CoorsNorm(scale_init = norm_coors_scale_init) if norm_rel_coors else nn.Identity()
         self.coors_combine = nn.Parameter(torch.randn(heads))
 
         self.rotary_emb = SinusoidalEmbeddings(dim_head // 2)
@@ -426,7 +423,6 @@ class EnTransformer(nn.Module):
         init_eps = 1e-3,
         norm_rel_coors = True,
         norm_coors_scale_init = 1.,
-        norm_coors_bias_init = 0.,
         global_linear_attn_every = 0,
         num_global_tokens = 8
     ):
@@ -461,7 +457,7 @@ class EnTransformer(nn.Module):
                     Residual(PreNorm(dim, GlobalLinearAttention(dim = dim, heads = heads, dim_head = dim_head))),
                     Residual(PreNorm(dim, FeedForward(dim = dim))),
                 ])  if add_global else None,
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, norm_coors_bias_init = norm_coors_bias_init))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

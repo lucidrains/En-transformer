@@ -155,13 +155,15 @@ class GlobalLinearAttention(nn.Module):
         dim_head = 64
     ):
         super().__init__()
+        self.norm = nn.LayerNorm(dim)
         self.attn1 = Attention(dim, heads, dim_head)
         self.attn2 = Attention(dim, heads, dim_head)
 
     def forward(self, x, queries, mask = None):
+        queries = self.norm(queries)
         induced = self.attn1(queries, x, mask = mask)
         out     = self.attn2(x, induced)
-        return out, 0
+        return out, induced
 
 class EquivariantAttention(nn.Module):
     def __init__(
@@ -456,8 +458,7 @@ class EnTransformer(nn.Module):
 
             self.layers.append(nn.ModuleList([
                 nn.ModuleList([
-                    nn.LayerNorm(dim),
-                    PreNorm(dim, GlobalLinearAttention(dim = dim, heads = heads, dim_head = dim_head)),
+                    Residual(PreNorm(dim, GlobalLinearAttention(dim = dim, heads = heads, dim_head = dim_head))),
                     Residual(PreNorm(dim, FeedForward(dim = dim))),
                 ])  if add_global else None,
                 Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, norm_coors_bias_init = norm_coors_bias_init))),
@@ -512,13 +513,9 @@ class EnTransformer(nn.Module):
 
         for global_fns, attn, ff in self.layers:
             if exists(global_fns):
-                global_norm, global_attn, global_ff = global_fns
+                global_attn, global_ff = global_fns
 
-                feats_out, global_out = global_attn(feats, global_norm(global_tokens), mask = mask)
-
-                feats = feats + feats_out
-                global_tokens = global_tokens + global_out
-
+                feats, global_tokens = global_attn(feats, global_tokens, mask = mask)
                 feats, coors = global_ff(feats, coors)
 
             feats, coors = attn(feats, coors, edges = edges, mask = mask, adj_mat = adj_mat)

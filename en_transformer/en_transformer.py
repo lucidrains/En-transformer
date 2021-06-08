@@ -468,6 +468,7 @@ class EnTransformer(nn.Module):
         edges = None,
         mask = None,
         adj_mat = None,
+        return_coor_changes = False,
         **kwargs
     ):
         b = feats.shape[0]
@@ -501,11 +502,15 @@ class EnTransformer(nn.Module):
                 adj_emb = self.adj_emb(adj_indices)
                 edges = torch.cat((edges, adj_emb), dim = -1) if exists(edges) else adj_emb
 
-        # main network
+        # setup global attention
 
         global_tokens = None
         if exists(self.global_tokens):
             global_tokens = repeat(self.global_tokens, 'n d -> b n d', b = b)
+
+        # go through layers
+
+        coor_changes = [coors]
 
         for global_fns, attn, ff in self.layers:
             if exists(global_fns):
@@ -515,6 +520,11 @@ class EnTransformer(nn.Module):
                 feats, coors = global_ff(feats, coors)
 
             feats, coors = attn(feats, coors, edges = edges, mask = mask, adj_mat = adj_mat)
+            coor_changes.append(coors)
+
             feats, coors = ff(feats, coors)
+
+        if return_coor_changes:
+            return feats, coors, coor_changes
 
         return feats, coors

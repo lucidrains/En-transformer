@@ -179,7 +179,8 @@ class EquivariantAttention(nn.Module):
         rel_pos_emb = None,
         edge_mlp_mult = 2,
         norm_rel_coors = True,
-        norm_coors_scale_init = 1.
+        norm_coors_scale_init = 1.,
+        use_cross_product = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -222,8 +223,18 @@ class EquivariantAttention(nn.Module):
             nn.Tanh()
         )
 
+        self.use_cross_product = use_cross_product
+        if use_cross_product:
+            self.cross_coors_mlp = nn.Sequential(
+                nn.Linear(heads, coors_hidden_dim),
+                nn.GELU(),
+                nn.Linear(coors_hidden_dim, heads * 2)
+            )
+
         self.norm_rel_coors = CoorsNorm(scale_init = norm_coors_scale_init) if norm_rel_coors else nn.Identity()
-        self.coors_combine = nn.Parameter(torch.randn(heads))
+
+        num_coors_combine_heads = (2 if use_cross_product else 1) * heads
+        self.coors_combine = nn.Parameter(torch.randn(num_coors_combine_heads))
 
         self.rotary_emb = SinusoidalEmbeddings(dim_head // 2)
         self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2) if rel_pos_emb else None
@@ -373,13 +384,47 @@ class EquivariantAttention(nn.Module):
         rel_coors_sign = self.coors_gate(coors_mlp_input)
         rel_coors_sign = rearrange(rel_coors_sign, 'b i j h -> b i j () h')
 
-        rel_coors = self.norm_rel_coors(rel_coors)
+        if self.use_cross_product:
+            rel_coors_i = repeat(rel_coors, 'b n i c -> b n (i j) c', j = j)
+            rel_coors_j = repeat(rel_coors, 'b n j c -> b n (i j) c', i = j)
 
+            cross_coors = torch.cross(rel_coors_i, rel_coors_j, dim = -1)
+
+            cross_coors = self.norm_rel_coors(cross_coors)
+            cross_coors = repeat(cross_coors, 'b i j c -> b i j c h', h = h)
+
+        rel_coors = self.norm_rel_coors(rel_coors)
         rel_coors = repeat(rel_coors, 'b i j c -> b i j c h', h = h)
 
         rel_coors = rel_coors * rel_coors_sign
 
-        coors_out = einsum('b i j h, b i j c h, h -> b i c', coor_attn, rel_coors, self.coors_combine)
+        # cross product
+
+        if self.use_cross_product:
+            cross_weights = self.cross_coors_mlp(coors_mlp_input)
+
+            cross_weights = rearrange(cross_weights, 'b i j (h n) -> b i j h n', n = 2)
+            cross_weights_i, cross_weights_j = cross_weights.unbind(dim = -1)
+
+            cross_weights = rearrange(cross_weights_i, 'b n i h -> b n i () h') + rearrange(cross_weights_j, 'b n j h -> b n () j h')
+
+            if exists(mask):
+                coor_weights = coor_weights.masked_fill(~coor_mask, mask_value)
+                cross_mask = (coor_mask[:, :, :, None, :] & coor_mask[:, :, None, :, :])
+                cross_weights = cross_weights.masked_fill(~cross_mask, mask_value)
+
+            cross_weights = rearrange(cross_weights, 'b n i j h -> b n (i j) h')
+            cross_attn = cross_weights.softmax(dim = -2)
+
+        # aggregate and combine heads for coordinate updates
+
+        rel_out = einsum('b i j h, b i j c h -> b i c h', coor_attn, rel_coors)
+
+        if self.use_cross_product:
+            cross_out = einsum('b i j h, b i j c h -> b i c h', cross_attn, cross_coors)
+            rel_out = torch.cat((rel_out, cross_out), dim = -1)
+
+        coors_out = einsum('b n c h, h -> b n c', rel_out, self.coors_combine)
 
         # derive attention
 
@@ -424,7 +469,8 @@ class EnTransformer(nn.Module):
         norm_rel_coors = True,
         norm_coors_scale_init = 1.,
         global_linear_attn_every = 0,
-        num_global_tokens = 8
+        num_global_tokens = 8,
+        use_cross_product = False
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -457,7 +503,7 @@ class EnTransformer(nn.Module):
                     Residual(PreNorm(dim, GlobalLinearAttention(dim = dim, heads = heads, dim_head = dim_head))),
                     Residual(PreNorm(dim, FeedForward(dim = dim))),
                 ])  if add_global else None,
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 

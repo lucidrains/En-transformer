@@ -16,11 +16,12 @@ from en_transformer import EnTransformer
 
 model = EnTransformer(
     dim = 512,
-    depth = 4,             # depth
-    dim_head = 64,         # dimension per head
-    heads = 8,             # number of heads
-    edge_dim = 4,          # dimension of edge feature
-    neighbors = 64         # only do attention between coordinates N nearest neighbors - set to 0 to turn off
+    depth = 4,               # depth
+    dim_head = 64,           # dimension per head
+    heads = 8,               # number of heads
+    edge_dim = 4,            # dimension of edge feature
+    neighbors = 64,          # only do attention between coordinates N nearest neighbors - set to 0 to turn off
+    use_cross_product = True # use cross product vectors (idea by @MattMcPartlon)
 )
 
 feats = torch.randn(1, 1024, 512)
@@ -71,7 +72,7 @@ model = EnTransformer(
     dim_head = 32,
     neighbors = 0,
     only_sparse_neighbors = True,    # must be set to true
-    num_adj_degrees = 3,             # the number of degrees to derive from 1st degree neighbors passed in
+    num_adj_degrees = 2,             # the number of degrees to derive from 1st degree neighbors passed in
     adj_dim = 8                      # whether to pass the adjacency degree information as an edge embedding
 )
 

@@ -409,7 +409,6 @@ class EquivariantAttention(nn.Module):
             cross_weights = rearrange(cross_weights_i, 'b n i h -> b n i () h') + rearrange(cross_weights_j, 'b n j h -> b n () j h')
 
             if exists(mask):
-                coor_weights = coor_weights.masked_fill(~coor_mask, mask_value)
                 cross_mask = (coor_mask[:, :, :, None, :] & coor_mask[:, :, None, :, :])
                 cross_weights = cross_weights.masked_fill(~cross_mask, mask_value)
 

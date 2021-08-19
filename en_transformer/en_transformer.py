@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn, einsum
 from torch.utils.checkpoint import checkpoint_sequential
 
-from en_transformer.rotary import SinusoidalEmbeddings, apply_rotary_pos_emb
+from rotary_embedding_torch import apply_rotary_emb, RotaryEmbedding
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
@@ -193,12 +193,13 @@ class EquivariantAttention(nn.Module):
         num_coors_combine_heads = (2 if use_cross_product else 1) * heads
         self.coors_combine = nn.Parameter(torch.randn(num_coors_combine_heads))
 
-        self.rotary_emb = SinusoidalEmbeddings(dim_head // (2 if rel_pos_emb else 1), theta = rotary_theta)
-        self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2, theta = rotary_theta) if rel_pos_emb else None
+        self.rotary_emb = RotaryEmbedding(dim_head // (2 if rel_pos_emb else 1), theta = rotary_theta)
+        self.rotary_emb_seq = RotaryEmbedding(dim_head // 2, theta = rotary_theta) if rel_pos_emb else None
 
         self.rel_dist_cutoff = rel_dist_cutoff
-        self.rel_dist_scale = rel_dist_scale
+        self.rel_dist_scale = rel_dist_scale 
 
+       
         self.init_eps = init_eps
         self.apply(self.init_)
 
@@ -312,9 +313,9 @@ class EquivariantAttention(nn.Module):
             q_pos_emb = broadcat((q_pos_emb, q_pos_emb_seq), dim = -1)
             k_pos_emb = broadcat((k_pos_emb, k_pos_emb_seq), dim = -1)
 
-        q = apply_rotary_pos_emb(q, q_pos_emb)
-        k = apply_rotary_pos_emb(k, k_pos_emb)
-        v = apply_rotary_pos_emb(v, k_pos_emb)
+        q = apply_rotary_emb(q, q_pos_emb)
+        k = apply_rotary_emb(k, k_pos_emb)
+        v = apply_rotary_emb(v, k_pos_emb)
 
         # calculate inner product for queries and keys
 
@@ -458,8 +459,14 @@ class EnTransformer(nn.Module):
         if only_sparse_neighbors:
             num_adj_degrees = default(num_adj_degrees, 1)
 
-        self.token_emb = nn.Embedding(num_tokens, dim) if exists(num_tokens) else None
-        self.edge_emb = nn.Embedding(num_edge_tokens, edge_dim) if exists(num_edge_tokens) else None
+        self.token_emb = {
+            "tok": nn.Embedding(num_tokens, dim), 
+            "proj": nn.Linear(num_tokens, dim),
+        } if exists(num_tokens) else None
+        self.edge_emb = {
+            "tok": nn.Embedding(num_edge_tokens, edge_dim), 
+            "proj": nn.Linear(num_edge_tokens, diedge_dimm),
+        } if exists(num_edge_tokens) else None
 
         self.num_adj_degrees = num_adj_degrees
         self.adj_emb = nn.Embedding(num_adj_degrees + 1, adj_dim) if exists(num_adj_degrees) and adj_dim > 0 else None
@@ -487,11 +494,11 @@ class EnTransformer(nn.Module):
         b = feats.shape[0]
 
         if exists(self.token_emb):
-            feats = self.token_emb(feats)
+            feats = self.token_emb["tok" if feats.dtype == torch.long else "proj"](feats) 
 
         if exists(self.edge_emb):
             assert exists(edges), 'edges must be passed in as (batch x seq x seq) indicating edge type'
-            edges = self.edge_emb(edges)
+            edges = self.edge_emb["tok" if edges.dtype == torch.long else "proj"](edges) 
 
         assert not (exists(adj_mat) and (not exists(self.num_adj_degrees) or self.num_adj_degrees == 0)), 'num_adj_degrees must be greater than 0 if you are passing in an adjacency matrix'
 

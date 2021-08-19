@@ -17,7 +17,8 @@ setup(
   ],
   install_requires=[
     'einops>=0.3',
-    'torch>=1.7'
+    'torch>=1.7',
+    'rotary-embedding-torch>=0.1.0'
   ],
   setup_requires=[
     'pytest-runner',

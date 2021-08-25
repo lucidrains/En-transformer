@@ -113,56 +113,6 @@ class FeedForward(nn.Module):
     def forward(self, feats, coors):
         return self.net(feats), 0
 
-class Attention(nn.Module):
-    def __init__(self, dim, heads = 8, dim_head = 64):
-        super().__init__()
-        inner_dim = heads * dim_head
-        self.heads = heads
-        self.scale = dim_head ** -0.5
-
-        self.to_q = nn.Linear(dim, inner_dim, bias = False)
-        self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
-        self.to_out = nn.Linear(inner_dim, dim)
-
-    def forward(self, x, context, mask = None):
-        h = self.heads
-
-        q = self.to_q(x)
-        kv = self.to_kv(context).chunk(2, dim = -1)
-
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, *kv))
-        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
-
-        if exists(mask):
-            mask_value = max_neg_value(dots)
-            mask = rearrange(mask, 'b n -> b () () n')
-            dots.masked_fill_(~mask, mask_value)
-
-        attn = dots.softmax(dim = -1)
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
-
-        out = rearrange(out, 'b h n d -> b n (h d)', h = h)
-        return self.to_out(out)
-
-class GlobalLinearAttention(nn.Module):
-    def __init__(
-        self,
-        *,
-        dim,
-        heads = 8,
-        dim_head = 64
-    ):
-        super().__init__()
-        self.norm = nn.LayerNorm(dim)
-        self.attn1 = Attention(dim, heads, dim_head)
-        self.attn2 = Attention(dim, heads, dim_head)
-
-    def forward(self, x, queries, mask = None):
-        queries = self.norm(queries)
-        induced = self.attn1(queries, x, mask = mask)
-        out     = self.attn2(x, induced)
-        return out, induced
-
 class EquivariantAttention(nn.Module):
     def __init__(
         self,
@@ -180,7 +130,8 @@ class EquivariantAttention(nn.Module):
         edge_mlp_mult = 2,
         norm_rel_coors = True,
         norm_coors_scale_init = 1.,
-        use_cross_product = False
+        use_cross_product = False,
+        talking_heads = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -193,6 +144,8 @@ class EquivariantAttention(nn.Module):
         self.heads = heads
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
         self.to_out = nn.Linear(attn_inner_dim, dim)
+
+        self.talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if talking_heads else None
 
         self.edge_mlp = None
         has_edges = edge_dim > 0
@@ -435,6 +388,9 @@ class EquivariantAttention(nn.Module):
 
         attn = sim.softmax(dim = -1)
 
+        if exists(self.talking_heads):
+            attn = self.talking_heads(attn)
+
         # weighted sum of values and combine heads
 
         out = einsum('b h i j, b h i j d -> b h i d', attn, v)
@@ -467,9 +423,8 @@ class EnTransformer(nn.Module):
         init_eps = 1e-3,
         norm_rel_coors = True,
         norm_coors_scale_init = 1.,
-        global_linear_attn_every = 0,
-        num_global_tokens = 8,
-        use_cross_product = False
+        use_cross_product = False,
+        talking_heads = False
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -487,22 +442,9 @@ class EnTransformer(nn.Module):
 
         self.layers = nn.ModuleList([])
 
-        global_linear_attn_every = default(global_linear_attn_every, 0)
-        has_global_attn = global_linear_attn_every > 0
-
-        self.global_tokens = None
-        if has_global_attn:
-            self.global_tokens = nn.Parameter(torch.randn(num_global_tokens, dim))
-
         for ind in range(depth):
-            add_global = global_linear_attn_every > 0 and (ind % global_linear_attn_every) == 0
-
             self.layers.append(nn.ModuleList([
-                nn.ModuleList([
-                    Residual(PreNorm(dim, GlobalLinearAttention(dim = dim, heads = heads, dim_head = dim_head))),
-                    Residual(PreNorm(dim, FeedForward(dim = dim))),
-                ])  if add_global else None,
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product, talking_heads = talking_heads))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ]))
 
@@ -547,23 +489,11 @@ class EnTransformer(nn.Module):
                 adj_emb = self.adj_emb(adj_indices)
                 edges = torch.cat((edges, adj_emb), dim = -1) if exists(edges) else adj_emb
 
-        # setup global attention
-
-        global_tokens = None
-        if exists(self.global_tokens):
-            global_tokens = repeat(self.global_tokens, 'n d -> b n d', b = b)
-
         # go through layers
 
         coor_changes = [coors]
 
-        for global_fns, attn, ff in self.layers:
-            if exists(global_fns):
-                global_attn, global_ff = global_fns
-
-                feats, global_tokens = global_attn(feats, global_tokens, mask = mask)
-                feats, coors = global_ff(feats, coors)
-
+        for attn, ff in self.layers:
             feats, coors = attn(feats, coors, edges = edges, mask = mask, adj_mat = adj_mat)
             coor_changes.append(coors)
 

@@ -21,6 +21,7 @@ model = EnTransformer(
     heads = 8,               # number of heads
     edge_dim = 4,            # dimension of edge feature
     neighbors = 64,          # only do attention between coordinates N nearest neighbors - set to 0 to turn off
+    talking_heads = True,    # use Shazeer's talking heads https://arxiv.org/abs/2003.02436
     use_cross_product = True # use cross product vectors (idea by @MattMcPartlon)
 )
 
@@ -140,5 +141,27 @@ $ python denoise.py
     eprint 	= {2102.09844},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{shazeer2020talkingheads,
+    title   = {Talking-Heads Attention}, 
+    author  = {Noam Shazeer and Zhenzhong Lan and Youlong Cheng and Nan Ding and Le Hou},
+    year    = {2020},
+    eprint  = {2003.02436},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{su2021roformer,
+    title   = {RoFormer: Enhanced Transformer with Rotary Position Embedding},
+    author  = {Jianlin Su and Yu Lu and Shengfeng Pan and Bo Wen and Yunfeng Liu},
+    year    = {2021},
+    eprint  = {2104.09864},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```

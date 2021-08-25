@@ -22,6 +22,7 @@ model = EnTransformer(
     edge_dim = 4,            # dimension of edge feature
     neighbors = 64,          # only do attention between coordinates N nearest neighbors - set to 0 to turn off
     talking_heads = True,    # use Shazeer's talking heads https://arxiv.org/abs/2003.02436
+    checkpoint = True,       # use checkpointing so one can increase depth at little memory cost (and increase neighbors attended to)
     use_cross_product = True # use cross product vectors (idea by @MattMcPartlon)
 )
 

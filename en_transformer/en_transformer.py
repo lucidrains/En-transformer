@@ -132,7 +132,10 @@ class EquivariantAttention(nn.Module):
         norm_rel_coors = True,
         norm_coors_scale_init = 1.,
         use_cross_product = False,
-        talking_heads = False
+        talking_heads = False,
+        rotary_theta = 10000,
+        rel_dist_cutoff = 5000,
+        rel_dist_scale = 1e2
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -190,8 +193,11 @@ class EquivariantAttention(nn.Module):
         num_coors_combine_heads = (2 if use_cross_product else 1) * heads
         self.coors_combine = nn.Parameter(torch.randn(num_coors_combine_heads))
 
-        self.rotary_emb = SinusoidalEmbeddings(dim_head // 2)
-        self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2) if rel_pos_emb else None
+        self.rotary_emb = SinusoidalEmbeddings(dim_head // (2 if rel_pos_emb else 1), theta = rotary_theta)
+        self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2, theta = rotary_theta) if rel_pos_emb else None
+
+        self.rel_dist_cutoff = rel_dist_cutoff
+        self.rel_dist_scale = rel_dist_scale
 
         self.init_eps = init_eps
         self.apply(self.init_)
@@ -290,7 +296,9 @@ class EquivariantAttention(nn.Module):
         rot_null = torch.zeros_like(rel_dist)
 
         q_pos_emb_rel_dist = self.rotary_emb(torch.zeros(n, device = device))
-        k_pos_emb_rel_dist = self.rotary_emb(rel_dist * 1e2)
+
+        rel_dist_to_rotate = (rel_dist * self.rel_dist_scale).clamp(max = self.rel_dist_cutoff)
+        k_pos_emb_rel_dist = self.rotary_emb(rel_dist_to_rotate)
 
         q_pos_emb = rearrange(q_pos_emb_rel_dist, 'i d -> () () i d')
         k_pos_emb = rearrange(k_pos_emb_rel_dist, 'b i j d -> b () i j d')
@@ -438,7 +446,10 @@ class EnTransformer(nn.Module):
         norm_coors_scale_init = 1.,
         use_cross_product = False,
         talking_heads = False,
-        checkpoint = False
+        checkpoint = False,
+        rotary_theta = 10000,
+        rel_dist_cutoff = 5000,
+        rel_dist_scale = 1e2
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -459,7 +470,7 @@ class EnTransformer(nn.Module):
 
         for ind in range(depth):
             self.layers.append(Block(
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product, talking_heads = talking_heads))),
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product, talking_heads = talking_heads, rotary_theta = rotary_theta, rel_dist_cutoff = rel_dist_cutoff, rel_dist_scale = rel_dist_scale))),
                 Residual(PreNorm(dim, FeedForward(dim = dim)))
             ))
 

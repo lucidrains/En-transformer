@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn, einsum
 from torch.utils.checkpoint import checkpoint_sequential
 
-from rotary_embedding_torch import apply_rotary_emb, RotaryEmbedding
+from en_transformer.rotary import SinusoidalEmbeddings, apply_rotary_pos_emb
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
@@ -193,8 +193,8 @@ class EquivariantAttention(nn.Module):
         num_coors_combine_heads = (2 if use_cross_product else 1) * heads
         self.coors_combine = nn.Parameter(torch.randn(num_coors_combine_heads))
 
-        self.rotary_emb = RotaryEmbedding(dim_head // (2 if rel_pos_emb else 1), theta = rotary_theta)
-        self.rotary_emb_seq = RotaryEmbedding(dim_head // 2, theta = rotary_theta) if rel_pos_emb else None
+        self.rotary_emb = SinusoidalEmbeddings(dim_head // (2 if rel_pos_emb else 1), theta = rotary_theta)
+        self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2, theta = rotary_theta) if rel_pos_emb else None
 
         self.rel_dist_cutoff = rel_dist_cutoff
         self.rel_dist_scale = rel_dist_scale 

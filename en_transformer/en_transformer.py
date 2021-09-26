@@ -459,14 +459,14 @@ class EnTransformer(nn.Module):
         if only_sparse_neighbors:
             num_adj_degrees = default(num_adj_degrees, 1)
 
-        self.token_emb = {
-            "tok": nn.Embedding(num_tokens, dim), 
-            "proj": nn.Linear(num_tokens, dim),
-        } if exists(num_tokens) else None
-        self.edge_emb = {
-            "tok": nn.Embedding(num_edge_tokens, edge_dim), 
-            "proj": nn.Linear(num_edge_tokens, diedge_dimm),
-        } if exists(num_edge_tokens) else None
+        self.token_emb = torch.nn.ModuleList([
+            nn.Embedding(num_tokens, dim), 
+            nn.Linear(num_tokens, dim),
+        ]) if exists(num_tokens) else None
+        self.edge_emb = torch.nn.ModuleList([
+            nn.Embedding(num_edge_tokens, edge_dim), 
+            nn.Linear(num_edge_tokens, diedge_dimm),
+        ]) if exists(num_edge_tokens) else None
 
         self.num_adj_degrees = num_adj_degrees
         self.adj_emb = nn.Embedding(num_adj_degrees + 1, adj_dim) if exists(num_adj_degrees) and adj_dim > 0 else None
@@ -494,11 +494,11 @@ class EnTransformer(nn.Module):
         b = feats.shape[0]
 
         if exists(self.token_emb):
-            feats = self.token_emb["tok" if feats.dtype == torch.long else "proj"](feats) 
+            feats = self.token_emb[0 if feats.dtype == torch.long else 1](feats) 
 
         if exists(self.edge_emb):
             assert exists(edges), 'edges must be passed in as (batch x seq x seq) indicating edge type'
-            edges = self.edge_emb["tok" if edges.dtype == torch.long else "proj"](edges) 
+            edges = self.edge_emb[0 if edges.dtype == torch.long else 1](edges) 
 
         assert not (exists(adj_mat) and (not exists(self.num_adj_degrees) or self.num_adj_degrees == 0)), 'num_adj_degrees must be greater than 0 if you are passing in an adjacency matrix'
 

@@ -313,9 +313,9 @@ class EquivariantAttention(nn.Module):
             q_pos_emb = broadcat((q_pos_emb, q_pos_emb_seq), dim = -1)
             k_pos_emb = broadcat((k_pos_emb, k_pos_emb_seq), dim = -1)
 
-        q = apply_rotary_emb(q, q_pos_emb)
-        k = apply_rotary_emb(k, k_pos_emb)
-        v = apply_rotary_emb(v, k_pos_emb)
+        q = apply_rotary_pos_emb(q, q_pos_emb)
+        k = apply_rotary_pos_emb(k, k_pos_emb)
+        v = apply_rotary_pos_emb(v, k_pos_emb)
 
         # calculate inner product for queries and keys
 

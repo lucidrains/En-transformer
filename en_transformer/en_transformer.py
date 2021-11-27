@@ -524,7 +524,7 @@ class EnTransformer(nn.Module):
 
         # if in training mode and checkpointing is designated, use checkpointing across blocks to save memory
         if self.training and self.checkpoint:
-            inp = checkpoint_sequential(self.layers, 1, inp)
+            inp = checkpoint_sequential(self.layers, len(self.layers), inp)
         else:
             # iterate through blocks
             for layer in self.layers:

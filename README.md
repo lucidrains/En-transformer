@@ -132,6 +132,10 @@ Then
 $ python denoise.py
 ```
 
+## Todo
+
+- [ ] add https://arxiv.org/abs/2112.05682 for researchers to stretch to even bigger molecules
+
 ## Citations
 
 ```bibtex

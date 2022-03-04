@@ -135,7 +135,8 @@ class EquivariantAttention(nn.Module):
         talking_heads = False,
         rotary_theta = 10000,
         rel_dist_cutoff = 5000,
-        rel_dist_scale = 1e2
+        rel_dist_scale = 1e2,
+        dropout = 0.
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -198,6 +199,9 @@ class EquivariantAttention(nn.Module):
 
         self.rel_dist_cutoff = rel_dist_cutoff
         self.rel_dist_scale = rel_dist_scale
+
+        self.node_dropout = nn.Dropout(dropout)
+        self.coor_dropout = nn.Dropout(dropout)
 
         self.init_eps = init_eps
         self.apply(self.init_)
@@ -342,6 +346,7 @@ class EquivariantAttention(nn.Module):
             coor_weights.masked_fill_(~coor_mask, mask_value)
 
         coor_attn = coor_weights.softmax(dim = -2)
+        coor_attn = self.coor_dropout(coor_attn)
 
         rel_coors_sign = self.coors_gate(coors_mlp_input)
         rel_coors_sign = rearrange(rel_coors_sign, 'b i j h -> b i j () h')
@@ -396,6 +401,7 @@ class EquivariantAttention(nn.Module):
             sim.masked_fill_(~mask, mask_value)
 
         attn = sim.softmax(dim = -1)
+        attn = self.node_dropout(attn)
 
         if exists(self.talking_heads):
             attn = self.talking_heads(attn)
@@ -449,7 +455,9 @@ class EnTransformer(nn.Module):
         checkpoint = False,
         rotary_theta = 10000,
         rel_dist_cutoff = 5000,
-        rel_dist_scale = 1e2
+        rel_dist_scale = 1e2,
+        attn_dropout = 0.,
+        ff_dropout = 0.
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -470,8 +478,8 @@ class EnTransformer(nn.Module):
 
         for ind in range(depth):
             self.layers.append(Block(
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product, talking_heads = talking_heads, rotary_theta = rotary_theta, rel_dist_cutoff = rel_dist_cutoff, rel_dist_scale = rel_dist_scale))),
-                Residual(PreNorm(dim, FeedForward(dim = dim)))
+                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product, talking_heads = talking_heads, rotary_theta = rotary_theta, rel_dist_cutoff = rel_dist_cutoff, rel_dist_scale = rel_dist_scale, dropout = attn_dropout))),
+                Residual(PreNorm(dim, FeedForward(dim = dim, dropout = ff_dropout)))
             ))
 
     def forward(

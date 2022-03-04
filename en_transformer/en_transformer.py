@@ -345,6 +345,7 @@ class EquivariantAttention(nn.Module):
             coor_mask = repeat(mask, 'b () i j -> b i j ()')
             coor_weights.masked_fill_(~coor_mask, mask_value)
 
+        coor_weights = coor_weights - coor_weights.amax(dim = -2, keepdim = True).detach()
         coor_attn = coor_weights.softmax(dim = -2)
         coor_attn = self.coor_dropout(coor_attn)
 
@@ -400,6 +401,7 @@ class EquivariantAttention(nn.Module):
             mask_value = max_neg_value(sim)
             sim.masked_fill_(~mask, mask_value)
 
+        sim = sim - sim.amax(dim = -1, keepdim = True).detach()
         attn = sim.softmax(dim = -1)
         attn = self.node_dropout(attn)
 

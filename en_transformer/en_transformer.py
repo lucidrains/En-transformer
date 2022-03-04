@@ -339,6 +339,7 @@ class EquivariantAttention(nn.Module):
 
         coors_mlp_input = rearrange(qk, 'b h i j -> b i j h')
         coor_weights = self.coors_mlp(coors_mlp_input)
+        coor_weights = coor_weights - coor_weights.amax(dim = -2, keepdim = True).detach()
 
         if exists(mask):
             mask_value = max_neg_value(coor_weights)
@@ -395,6 +396,7 @@ class EquivariantAttention(nn.Module):
         # derive attention
 
         sim = qk.clone()
+        sim = sim - sim.amax(dim = -1, keepdim = True).detach()
 
         if exists(mask):
             mask_value = max_neg_value(sim)

@@ -19,6 +19,9 @@ def max_neg_value(t):
 def default(val, d):
     return val if exists(val) else d
 
+def l2norm(t):
+    return F.normalize(t, dim = -1)
+
 def broadcat(tensors, dim = -1):
     num_tensors = len(tensors)
     shape_lens = set(list(map(lambda t: len(t.shape), tensors)))
@@ -136,10 +139,11 @@ class EquivariantAttention(nn.Module):
         rotary_theta = 10000,
         rel_dist_cutoff = 5000,
         rel_dist_scale = 1e2,
+        scale = 8,
         dropout = 0.
     ):
         super().__init__()
-        self.scale = dim_head ** -0.5
+        self.scale = scale
 
         self.neighbors = neighbors
         self.only_sparse_neighbors = only_sparse_neighbors
@@ -316,6 +320,12 @@ class EquivariantAttention(nn.Module):
             q_pos_emb = broadcat((q_pos_emb, q_pos_emb_seq), dim = -1)
             k_pos_emb = broadcat((k_pos_emb, k_pos_emb_seq), dim = -1)
 
+        # cosine sim attention
+
+        q, k = map(l2norm, (q, k))
+
+        # apply rotary embeddings
+
         q = apply_rotary_pos_emb(q, q_pos_emb)
         k = apply_rotary_pos_emb(k, k_pos_emb)
         v = apply_rotary_pos_emb(v, k_pos_emb)
@@ -345,7 +355,6 @@ class EquivariantAttention(nn.Module):
             coor_mask = repeat(mask, 'b () i j -> b i j ()')
             coor_weights.masked_fill_(~coor_mask, mask_value)
 
-        coor_weights = coor_weights - coor_weights.amax(dim = -2, keepdim = True).detach()
         coor_attn = coor_weights.softmax(dim = -2)
         coor_attn = self.coor_dropout(coor_attn)
 
@@ -401,7 +410,6 @@ class EquivariantAttention(nn.Module):
             mask_value = max_neg_value(sim)
             sim.masked_fill_(~mask, mask_value)
 
-        sim = sim - sim.amax(dim = -1, keepdim = True).detach()
         attn = sim.softmax(dim = -1)
         attn = self.node_dropout(attn)
 

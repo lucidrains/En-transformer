@@ -161,12 +161,12 @@ $ python denoise.py
 ```
 
 ```bibtex
-@misc{su2021roformer,
-    title   = {RoFormer: Enhanced Transformer with Rotary Position Embedding},
-    author  = {Jianlin Su and Yu Lu and Shengfeng Pan and Bo Wen and Yunfeng Liu},
+@misc{liu2021swin,
+    title   = {Swin Transformer V2: Scaling Up Capacity and Resolution},
+    author  = {Ze Liu and Han Hu and Yutong Lin and Zhuliang Yao and Zhenda Xie and Yixuan Wei and Jia Ning and Yue Cao and Zheng Zhang and Li Dong and Furu Wei and Baining Guo},
     year    = {2021},
-    eprint  = {2104.09864},
+    eprint  = {2111.09883},
     archivePrefix = {arXiv},
-    primaryClass = {cs.CL}
+    primaryClass = {cs.CV}
 }
 ```

@@ -3,8 +3,6 @@ import torch.nn.functional as F
 from torch import nn, einsum
 from torch.utils.checkpoint import checkpoint_sequential
 
-from en_transformer.rotary import SinusoidalEmbeddings, apply_rotary_pos_emb
-
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
@@ -22,24 +20,6 @@ def default(val, d):
 def l2norm(t):
     return F.normalize(t, dim = -1)
 
-def broadcat(tensors, dim = -1):
-    num_tensors = len(tensors)
-    shape_lens = set(list(map(lambda t: len(t.shape), tensors)))
-    assert len(shape_lens) == 1, 'tensors must all have the same number of dimensions'
-    shape_len = list(shape_lens)[0]
-
-    dim = (dim + shape_len) if dim < 0 else dim
-    dims = list(zip(*map(lambda t: list(t.shape), tensors)))
-
-    expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
-    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), 'invalid dimensions for broadcastable concatentation'
-    max_dims = list(map(lambda t: (t[0], max(t[1])), expandable_dims))
-    expanded_dims = list(map(lambda t: (t[0], (t[1],) * num_tensors), max_dims))
-    expanded_dims.insert(dim, (dim, dims[dim]))
-    expandable_shapes = list(zip(*map(lambda t: t[1], expanded_dims)))
-    tensors = list(map(lambda t: t[0].expand(*t[1]), zip(tensors, expandable_shapes)))
-    return torch.cat(tensors, dim = dim)
-
 def batched_index_select(values, indices, dim = 1):
     value_dims = values.shape[(dim + 1):]
     values_shape, indices_shape = map(lambda t: list(t.shape), (values, indices))
@@ -56,10 +36,64 @@ def batched_index_select(values, indices, dim = 1):
     dim += value_expand_len
     return values.gather(dim, indices)
 
+# dynamic positional bias
+
+class DynamicPositionBias(nn.Module):
+    def __init__(
+        self,
+        dim,
+        *,
+        heads,
+        depth,
+        dim_head,
+        input_dim = 1,
+        norm = True
+    ):
+        super().__init__()
+        assert depth >= 1, 'depth for dynamic position bias MLP must be greater or equal to 1'
+        self.mlp = nn.ModuleList([])
+
+        self.mlp.append(nn.Sequential(
+            nn.Linear(input_dim, dim),
+            nn.LayerNorm(dim) if norm else nn.Identity(),
+            nn.SiLU()
+        ))
+
+        for _ in range(depth - 1):
+            self.mlp.append(nn.Sequential(
+                nn.Linear(dim, dim),
+                nn.LayerNorm(dim) if norm else nn.Identity(),
+                nn.SiLU()
+            ))
+
+        self.heads = heads
+        self.qk_pos_head = nn.Linear(dim, heads)
+        self.value_pos_head = nn.Linear(dim, dim_head * heads)
+
+    def forward(self, pos):
+        for layer in self.mlp:
+            pos = layer(pos)
+
+        qk_pos = self.qk_pos_head(pos)
+        value_pos = self.value_pos_head(pos)
+
+        qk_pos = rearrange(qk_pos, 'b 1 i j h -> b h i j')
+        value_pos = rearrange(value_pos, 'b 1 i j (h d) -> b h i j d', h = self.heads)
+        return qk_pos, value_pos
+
 # classes
 
 # this follows the same strategy for normalization as done in SE3 Transformers
 # https://github.com/lucidrains/se3-transformer-pytorch/blob/main/se3_transformer_pytorch/se3_transformer_pytorch.py#L95
+
+class LayerNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.gamma = nn.Parameter(torch.ones(dim))
+        self.register_buffer('beta', torch.zeros(dim))
+
+    def forward(self, x):
+        return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
 
 class CoorsNorm(nn.Module):
     def __init__(self, eps = 1e-8, scale_init = 1.):
@@ -72,17 +106,6 @@ class CoorsNorm(nn.Module):
         norm = coors.norm(dim = -1, keepdim = True)
         normed_coors = coors / norm.clamp(min = self.eps)
         return normed_coors * self.scale
-
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.fn = fn
-        self.norm = nn.LayerNorm(dim)
-
-    def forward(self, feats, coors, **kwargs):
-        feats = self.norm(feats)
-        feats, coors = self.fn(feats, coors, **kwargs)
-        return feats, coors
 
 class Residual(nn.Module):
     def __init__(self, fn):
@@ -108,10 +131,11 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(dim, dim * 4 * 2),
+            LayerNorm(dim),
+            nn.Linear(dim, dim * 4 * 2, bias = False),
             GEGLU(),
             nn.Dropout(dropout),
-            nn.Linear(dim * 4, dim)
+            nn.Linear(dim * 4, dim, bias = False)
         )
 
     def forward(self, feats, coors):
@@ -136,14 +160,13 @@ class EquivariantAttention(nn.Module):
         norm_coors_scale_init = 1.,
         use_cross_product = False,
         talking_heads = False,
-        rotary_theta = 10000,
-        rel_dist_cutoff = 5000,
-        rel_dist_scale = 1e2,
         scale = 8,
         dropout = 0.
     ):
         super().__init__()
         self.scale = scale
+
+        self.norm = LayerNorm(dim)
 
         self.neighbors = neighbors
         self.only_sparse_neighbors = only_sparse_neighbors
@@ -164,20 +187,20 @@ class EquivariantAttention(nn.Module):
             edge_hidden = edge_input_dim * edge_mlp_mult
 
             self.edge_mlp = nn.Sequential(
-                nn.Linear(edge_input_dim, edge_hidden),
+                nn.Linear(edge_input_dim, edge_hidden, bias = False),
                 nn.GELU(),
-                nn.Linear(edge_hidden, heads)
+                nn.Linear(edge_hidden, heads, bias = False)
             )
 
             self.coors_mlp = nn.Sequential(
                 nn.GELU(),
-                nn.Linear(heads, heads)
+                nn.Linear(heads, heads, bias = False)
             )
         else:
             self.coors_mlp = nn.Sequential(
-                nn.Linear(heads, coors_hidden_dim),
+                nn.Linear(heads, coors_hidden_dim, bias = False),
                 nn.GELU(),
-                nn.Linear(coors_hidden_dim, heads)
+                nn.Linear(coors_hidden_dim, heads, bias = False)
             )
 
         self.coors_gate = nn.Sequential(
@@ -188,9 +211,9 @@ class EquivariantAttention(nn.Module):
         self.use_cross_product = use_cross_product
         if use_cross_product:
             self.cross_coors_mlp = nn.Sequential(
-                nn.Linear(heads, coors_hidden_dim),
+                nn.Linear(heads, coors_hidden_dim, bias = False),
                 nn.GELU(),
-                nn.Linear(coors_hidden_dim, heads * 2)
+                nn.Linear(coors_hidden_dim, heads * 2, bias = False)
             )
 
         self.norm_rel_coors = CoorsNorm(scale_init = norm_coors_scale_init) if norm_rel_coors else nn.Identity()
@@ -198,14 +221,25 @@ class EquivariantAttention(nn.Module):
         num_coors_combine_heads = (2 if use_cross_product else 1) * heads
         self.coors_combine = nn.Parameter(torch.randn(num_coors_combine_heads))
 
-        self.rotary_emb = SinusoidalEmbeddings(dim_head // (2 if rel_pos_emb else 1), theta = rotary_theta)
-        self.rotary_emb_seq = SinusoidalEmbeddings(dim_head // 2, theta = rotary_theta) if rel_pos_emb else None
+        # positional embedding
+        # for both along the sequence (if specified by rel_pos_emb) and the relative distance between each residue / atom
 
-        self.rel_dist_cutoff = rel_dist_cutoff
-        self.rel_dist_scale = rel_dist_scale
+        self.rel_pos_emb = rel_pos_emb
+
+        self.dynamic_pos_bias_mlp = DynamicPositionBias(
+            dim = dim // 2,
+            heads = heads,
+            dim_head = dim_head,
+            depth = 3,
+            input_dim = (2 if rel_pos_emb else 1)
+        )
+
+        # dropouts
 
         self.node_dropout = nn.Dropout(dropout)
         self.coor_dropout = nn.Dropout(dropout)
+
+        # init
 
         self.init_eps = init_eps
         self.apply(self.init_)
@@ -223,6 +257,8 @@ class EquivariantAttention(nn.Module):
         adj_mat = None
     ):
         b, n, d, h, num_nn, only_sparse_neighbors, valid_neighbor_radius, device = *feats.shape, self.heads, self.neighbors, self.only_sparse_neighbors, self.valid_neighbor_radius, feats.device
+
+        feats = self.norm(feats)
 
         assert not (only_sparse_neighbors and not exists(adj_mat)), 'adjacency matrix must be passed in if only_sparse_neighbors is turned on'
 
@@ -286,53 +322,43 @@ class EquivariantAttention(nn.Module):
         # prepare mask
 
         if exists(mask):
-            q_mask = rearrange(mask, 'b i -> b () i ()')
+            q_mask = rearrange(mask, 'b i -> b 1 i 1')
             k_mask = repeat(mask, 'b j -> b i j', i = n)
 
             if exists(nbhd_indices):
                 k_mask = batched_index_select(k_mask, nbhd_indices, dim = 2)
 
-            k_mask = rearrange(k_mask, 'b i j -> b () i j')
+            k_mask = rearrange(k_mask, 'b i j -> b 1 i j')
 
             mask = q_mask * k_mask
 
             if exists(nbhd_masks):
-                mask &= rearrange(nbhd_masks, 'b i j -> b () i j')
-
-        # generate and apply rotary embeddings
-
-        rot_null = torch.zeros_like(rel_dist)
-
-        q_pos_emb_rel_dist = self.rotary_emb(torch.zeros(n, device = device))
-
-        rel_dist_to_rotate = (rel_dist * self.rel_dist_scale).clamp(max = self.rel_dist_cutoff)
-        k_pos_emb_rel_dist = self.rotary_emb(rel_dist_to_rotate)
-
-        q_pos_emb = rearrange(q_pos_emb_rel_dist, 'i d -> () () i d')
-        k_pos_emb = rearrange(k_pos_emb_rel_dist, 'b i j d -> b () i j d')
-
-        if exists(self.rotary_emb_seq):
-            pos_emb = self.rotary_emb_seq(torch.arange(n, device = device))
-
-            q_pos_emb_seq = rearrange(pos_emb, 'n d -> () () n d')
-            k_pos_emb_seq = rearrange(pos_emb, 'n d -> () () n () d')
-
-            q_pos_emb = broadcat((q_pos_emb, q_pos_emb_seq), dim = -1)
-            k_pos_emb = broadcat((k_pos_emb, k_pos_emb_seq), dim = -1)
+                mask &= rearrange(nbhd_masks, 'b i j -> b 1 i j')
 
         # cosine sim attention
 
         q, k = map(l2norm, (q, k))
 
-        # apply rotary embeddings
+        # generate and apply rotary embeddings
 
-        q = apply_rotary_pos_emb(q, q_pos_emb)
-        k = apply_rotary_pos_emb(k, k_pos_emb)
-        v = apply_rotary_pos_emb(v, k_pos_emb)
+        rel_dist = -rel_dist
+        rel_dist = rearrange(rel_dist, 'b i j -> b 1 i j 1')
+
+        if self.rel_pos_emb:
+            seq = torch.arange(n, device = device, dtype = q.dtype)
+            seq_rel_dist = rearrange(seq, 'i -> 1 i 1') - nbhd_indices
+            seq_rel_dist = repeat(seq_rel_dist, 'b i j -> b 1 i j 1', b = b)
+            rel_dist = torch.cat((rel_dist, seq_rel_dist), dim = -1)
+
+        qk_pos, value_pos = self.dynamic_pos_bias_mlp(rel_dist)
 
         # calculate inner product for queries and keys
 
         qk = einsum('b h i d, b h i j d -> b h i j', q, k) * (self.scale if not exists(edges) else 1)
+
+        qk = qk + qk_pos
+
+        v = v + value_pos
 
         # add edge information and pass through edges MLP if needed
 
@@ -352,14 +378,14 @@ class EquivariantAttention(nn.Module):
 
         if exists(mask):
             mask_value = max_neg_value(coor_weights)
-            coor_mask = repeat(mask, 'b () i j -> b i j ()')
+            coor_mask = repeat(mask, 'b 1 i j -> b i j 1')
             coor_weights.masked_fill_(~coor_mask, mask_value)
 
         coor_attn = coor_weights.softmax(dim = -2)
         coor_attn = self.coor_dropout(coor_attn)
 
         rel_coors_sign = self.coors_gate(coors_mlp_input)
-        rel_coors_sign = rearrange(rel_coors_sign, 'b i j h -> b i j () h')
+        rel_coors_sign = rearrange(rel_coors_sign, 'b i j h -> b i j 1 h')
 
         if self.use_cross_product:
             rel_coors_i = repeat(rel_coors, 'b n i c -> b n (i j) c', j = j)
@@ -383,7 +409,7 @@ class EquivariantAttention(nn.Module):
             cross_weights = rearrange(cross_weights, 'b i j (h n) -> b i j h n', n = 2)
             cross_weights_i, cross_weights_j = cross_weights.unbind(dim = -1)
 
-            cross_weights = rearrange(cross_weights_i, 'b n i h -> b n i () h') + rearrange(cross_weights_j, 'b n j h -> b n () j h')
+            cross_weights = rearrange(cross_weights_i, 'b n i h -> b n i 1 h') + rearrange(cross_weights_j, 'b n j h -> b n 1 j h')
 
             if exists(mask):
                 cross_mask = (coor_mask[:, :, :, None, :] & coor_mask[:, :, None, :, :])
@@ -463,9 +489,6 @@ class EnTransformer(nn.Module):
         use_cross_product = False,
         talking_heads = False,
         checkpoint = False,
-        rotary_theta = 10000,
-        rel_dist_cutoff = 5000,
-        rel_dist_scale = 1e2,
         attn_dropout = 0.,
         ff_dropout = 0.
     ):
@@ -488,8 +511,27 @@ class EnTransformer(nn.Module):
 
         for ind in range(depth):
             self.layers.append(Block(
-                Residual(PreNorm(dim, EquivariantAttention(dim = dim, dim_head = dim_head, heads = heads, coors_hidden_dim = coors_hidden_dim, edge_dim = (edge_dim + adj_dim),  neighbors = neighbors, only_sparse_neighbors = only_sparse_neighbors, valid_neighbor_radius = valid_neighbor_radius, init_eps = init_eps, rel_pos_emb = rel_pos_emb, norm_rel_coors = norm_rel_coors, norm_coors_scale_init = norm_coors_scale_init, use_cross_product = use_cross_product, talking_heads = talking_heads, rotary_theta = rotary_theta, rel_dist_cutoff = rel_dist_cutoff, rel_dist_scale = rel_dist_scale, dropout = attn_dropout))),
-                Residual(PreNorm(dim, FeedForward(dim = dim, dropout = ff_dropout)))
+                Residual(EquivariantAttention(
+                    dim = dim,
+                    dim_head = dim_head,
+                    heads = heads,
+                    coors_hidden_dim = coors_hidden_dim,
+                    edge_dim = (edge_dim + adj_dim),
+                    neighbors = neighbors,
+                    only_sparse_neighbors = only_sparse_neighbors,
+                    valid_neighbor_radius = valid_neighbor_radius,
+                    init_eps = init_eps,
+                    rel_pos_emb = rel_pos_emb,
+                    norm_rel_coors = norm_rel_coors,
+                    norm_coors_scale_init = norm_coors_scale_init,
+                    use_cross_product = use_cross_product,
+                    talking_heads = talking_heads,
+                    dropout = attn_dropout
+                )),
+                Residual(FeedForward(
+                    dim = dim,
+                    dropout = ff_dropout
+                ))
             ))
 
     def forward(
@@ -541,6 +583,7 @@ class EnTransformer(nn.Module):
         inp = (feats, coors, mask, edges, adj_mat)
 
         # if in training mode and checkpointing is designated, use checkpointing across blocks to save memory
+
         if self.training and self.checkpoint:
             inp = checkpoint_sequential(self.layers, len(self.layers), inp)
         else:

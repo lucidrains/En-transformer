@@ -130,12 +130,15 @@ class FeedForward(nn.Module):
         dropout = 0.
     ):
         super().__init__()
+        inner_dim = int(dim * mult * 2 / 3)
+
         self.net = nn.Sequential(
             LayerNorm(dim),
-            nn.Linear(dim, dim * 4 * 2, bias = False),
+            nn.Linear(dim, inner_dim * 2, bias = False),
             GEGLU(),
+            LayerNorm(inner_dim),
             nn.Dropout(dropout),
-            nn.Linear(dim * 4, dim, bias = False)
+            nn.Linear(inner_dim, dim, bias = False)
         )
 
     def forward(self, feats, coors):

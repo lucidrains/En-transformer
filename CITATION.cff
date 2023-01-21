@@ -1,0 +1,17 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: En-transformer
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Phil Wang
+    email: lucidrains@gmail.com
+    name-particle: Phillip
+    family-names: Wang
+repository-code: 'https://github.com/lucidrains/En-transformer'
+abstract: Extending EGNN to a transformer
+license: MIT

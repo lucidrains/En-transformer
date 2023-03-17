@@ -144,6 +144,44 @@ class FeedForward(nn.Module):
     def forward(self, feats, coors):
         return self.net(feats), 0
 
+class LinearAttention(nn.Module):
+    def __init__(
+        self,
+        dim,
+        dim_head = 64,
+        heads = 8
+    ):
+        super().__init__()
+        self.heads = heads
+        self.dim_hidden = dim_head * heads
+        self.to_qkv = nn.Linear(dim, self.dim_hidden * 3)
+
+    def forward(self, x, mask = None):
+        has_degree_m_dim = x.ndim == 4
+
+        if has_degree_m_dim:
+            x = rearrange(x, '... 1 -> ...')
+
+        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
+
+        if exists(mask):
+            mask = rearrange(mask, 'b n -> b 1 n 1')
+            k = k.masked_fill(~mask, -torch.finfo(q.dtype).max)
+            v = v.masked_fill(~mask, 0.)
+
+        k = k.softmax(dim = -2)
+        q = q.softmax(dim = -1)
+
+        kv = einsum('b h n d, b h n e -> b h d e', k, v)
+        out = einsum('b h d e, b h n d -> b h n e', kv, q)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+
+        if has_degree_m_dim:
+            out = rearrange(out, '... -> ... 1')
+
+        return out
+
 class EquivariantAttention(nn.Module):
     def __init__(
         self,
@@ -164,7 +202,8 @@ class EquivariantAttention(nn.Module):
         use_cross_product = False,
         talking_heads = False,
         scale = 8,
-        dropout = 0.
+        dropout = 0.,
+        num_global_linear_attn_heads = 0
     ):
         super().__init__()
         self.scale = scale
@@ -177,8 +216,12 @@ class EquivariantAttention(nn.Module):
 
         attn_inner_dim = heads * dim_head
         self.heads = heads
+
+        self.has_linear_attn = num_global_linear_attn_heads > 0
+        self.linear_attn = LinearAttention(dim = dim, dim_head = dim_head, heads = num_global_linear_attn_heads)
+
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
-        self.to_out = nn.Linear(attn_inner_dim, dim)
+        self.to_out = nn.Linear(attn_inner_dim + self.linear_attn.dim_hidden, dim)
 
         self.talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if talking_heads else None
 
@@ -261,6 +304,7 @@ class EquivariantAttention(nn.Module):
     ):
         b, n, d, h, num_nn, only_sparse_neighbors, valid_neighbor_radius, device = *feats.shape, self.heads, self.neighbors, self.only_sparse_neighbors, self.valid_neighbor_radius, feats.device
 
+        _mask = mask
         feats = self.norm(feats)
 
         assert not (only_sparse_neighbors and not exists(adj_mat)), 'adjacency matrix must be passed in if only_sparse_neighbors is turned on'
@@ -451,6 +495,15 @@ class EquivariantAttention(nn.Module):
         out = einsum('b h i j, b h i j d -> b h i d', attn, v)
 
         out = rearrange(out, 'b h n d -> b n (h d)')
+
+        # linear attention
+
+        if self.has_linear_attn:
+            lin_out = self.linear_attn(feats, mask = _mask)
+            out = torch.cat((out, lin_out), dim = -1)
+
+        # combine heads, both local + global linear attention (if designated)
+
         out = self.to_out(out)
 
         return out, coors_out
@@ -494,7 +547,8 @@ class EnTransformer(nn.Module):
         talking_heads = False,
         checkpoint = False,
         attn_dropout = 0.,
-        ff_dropout = 0.
+        ff_dropout = 0.,
+        num_global_linear_attn_heads = 0
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -530,7 +584,8 @@ class EnTransformer(nn.Module):
                     norm_coors_scale_init = norm_coors_scale_init,
                     use_cross_product = use_cross_product,
                     talking_heads = talking_heads,
-                    dropout = attn_dropout
+                    dropout = attn_dropout,
+                    num_global_linear_attn_heads = num_global_linear_attn_heads
                 )),
                 Residual(FeedForward(
                     dim = dim,

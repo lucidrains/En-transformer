@@ -16,14 +16,15 @@ from en_transformer import EnTransformer
 
 model = EnTransformer(
     dim = 512,
-    depth = 4,               # depth
-    dim_head = 64,           # dimension per head
-    heads = 8,               # number of heads
-    edge_dim = 4,            # dimension of edge feature
-    neighbors = 64,          # only do attention between coordinates N nearest neighbors - set to 0 to turn off
-    talking_heads = True,    # use Shazeer's talking heads https://arxiv.org/abs/2003.02436
-    checkpoint = True,       # use checkpointing so one can increase depth at little memory cost (and increase neighbors attended to)
-    use_cross_product = True # use cross product vectors (idea by @MattMcPartlon)
+    depth = 4,                       # depth
+    dim_head = 64,                   # dimension per head
+    heads = 8,                       # number of heads
+    edge_dim = 4,                    # dimension of edge feature
+    neighbors = 64,                  # only do attention between coordinates N nearest neighbors - set to 0 to turn off
+    talking_heads = True,            # use Shazeer's talking heads https://arxiv.org/abs/2003.02436
+    checkpoint = True,               # use checkpointing so one can increase depth at little memory cost (and increase neighbors attended to)
+    use_cross_product = True,        # use cross product vectors (idea by @MattMcPartlon)
+    num_global_linear_attn_heads = 2 # if your number of neighbors above is low, you can assign a certain number of attention heads to weakly attend globally to all other nodes through linear attention (https://arxiv.org/abs/1812.01243)
 )
 
 feats = torch.randn(1, 1024, 512)
@@ -168,5 +169,13 @@ $ python denoise.py
     eprint  = {2111.09883},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@inproceedings{Shen2018DecomposedAS,
+    title   = {Decomposed Attention: Self-Attention with Linear Complexities},
+    author  = {Zhuoran Shen and Mingyuan Zhang and Haiyu Zhao and Shuai Yi and Hongsheng Li},
+    year    = {2018}
 }
 ```

@@ -179,3 +179,13 @@ $ python denoise.py
     year    = {2018}
 }
 ```
+
+```bibtex
+@inproceedings{Kim2020TheLC,
+    title   = {The Lipschitz Constant of Self-Attention},
+    author  = {Hyunjik Kim and George Papamakarios and Andriy Mnih},
+    booktitle = {International Conference on Machine Learning},
+    year    = {2020},
+    url     = {https://api.semanticscholar.org/CorpusID:219530837}
+}
+```

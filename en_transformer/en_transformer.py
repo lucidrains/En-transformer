@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn, einsum
 from torch.utils.checkpoint import checkpoint_sequential
 
-from einops import rearrange, repeat
+from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
 # helper functions
@@ -200,14 +200,12 @@ class EquivariantAttention(nn.Module):
         norm_rel_coors = True,
         norm_coors_scale_init = 1.,
         use_cross_product = False,
-        talking_heads = False,
-        scale = 8,
+        talking_heads = False,        
         dropout = 0.,
         num_global_linear_attn_heads = 0
     ):
         super().__init__()
-        self.scale = scale
-
+        self.scale = dim_head ** -0.5
         self.norm = LayerNorm(dim)
 
         self.neighbors = neighbors
@@ -312,7 +310,7 @@ class EquivariantAttention(nn.Module):
         if exists(mask):
             num_nodes = mask.sum(dim = -1)
 
-        rel_coors = rearrange(coors, 'b i d -> b i () d') - rearrange(coors, 'b j d -> b () j d')
+        rel_coors = rearrange(coors, 'b i d -> b i 1 d') - rearrange(coors, 'b j d -> b 1 j d')
         rel_dist = rel_coors.norm(p = 2, dim = -1)
 
         # calculate neighborhood indices
@@ -326,7 +324,7 @@ class EquivariantAttention(nn.Module):
                 adj_mat = repeat(adj_mat, 'i j -> b i j', b = b)
 
             self_mask = torch.eye(n, device = device).bool()
-            self_mask = rearrange(self_mask, 'i j -> () i j')
+            self_mask = rearrange(self_mask, 'i j -> 1 i j')
             adj_mat.masked_fill_(self_mask, False)
 
             max_adj_neighbors = adj_mat.long().sum(dim = -1).max().item() + 1
@@ -382,10 +380,6 @@ class EquivariantAttention(nn.Module):
             if exists(nbhd_masks):
                 mask &= rearrange(nbhd_masks, 'b i j -> b 1 i j')
 
-        # cosine sim attention
-
-        q, k = map(l2norm, (q, k))
-
         # generate and apply rotary embeddings
 
         rel_dist = -rel_dist
@@ -402,7 +396,16 @@ class EquivariantAttention(nn.Module):
 
         # calculate inner product for queries and keys
 
-        qk = einsum('b h i d, b h i j d -> b h i j', q, k) * (self.scale if not exists(edges) else 1)
+        q = repeat(q, 'b h i d -> b h i j d', j = k.shape[-2])
+
+        # l2 distance
+        # -cdist(q, k).pow(2)
+
+        qk = -((q - k) ** 2).sum(dim = -1)
+
+        qk = qk * self.scale
+
+        # add relative positions to qk as well as values
 
         qk = qk + qk_pos
 

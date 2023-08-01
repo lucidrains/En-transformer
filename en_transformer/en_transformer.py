@@ -20,6 +20,10 @@ def default(val, d):
 def l2norm(t):
     return F.normalize(t, dim = -1)
 
+def small_init_(t: nn.Linear):
+    nn.init.normal_(t.weight, std = 0.02)
+    nn.init.zeros_(t.bias)
+
 def batched_index_select(values, indices, dim = 1):
     value_dims = values.shape[(dim + 1):]
     values_shape, indices_shape = map(lambda t: list(t.shape), (values, indices))
@@ -247,10 +251,8 @@ class EquivariantAttention(nn.Module):
                 nn.Linear(coors_hidden_dim, heads, bias = False)
             )
 
-        self.coors_gate = nn.Sequential(
-            nn.Linear(heads, heads),
-            nn.Tanh()
-        )
+        self.coors_gate = nn.Linear(heads, heads)
+        small_init_(self.coors_gate)
 
         self.use_cross_product = use_cross_product
         if use_cross_product:
@@ -259,6 +261,12 @@ class EquivariantAttention(nn.Module):
                 nn.GELU(),
                 nn.Linear(coors_hidden_dim, heads * 2, bias = False)
             )
+
+            self.cross_coors_gate_i = nn.Linear(heads, heads)
+            self.cross_coors_gate_j = nn.Linear(heads, heads)
+
+            small_init_(self.cross_coors_gate_i)
+            small_init_(self.cross_coors_gate_j)
 
         self.norm_rel_coors = CoorsNorm(scale_init = norm_coors_scale_init) if norm_rel_coors else nn.Identity()
 
@@ -382,7 +390,7 @@ class EquivariantAttention(nn.Module):
 
         # generate and apply rotary embeddings
 
-        rel_dist = -rel_dist
+        rel_dist = -(rel_dist ** 2)
         rel_dist = rearrange(rel_dist, 'b i j -> b 1 i j 1')
 
         if self.rel_pos_emb:
@@ -446,6 +454,14 @@ class EquivariantAttention(nn.Module):
 
             cross_coors = self.norm_rel_coors(cross_coors)
             cross_coors = repeat(cross_coors, 'b i j c -> b i j c h', h = h)
+
+            cross_coors_sign_i = self.cross_coors_gate_i(coors_mlp_input)
+            cross_coors_sign_j = self.cross_coors_gate_j(coors_mlp_input)
+
+            cross_coors_sign = rearrange(cross_coors_sign_i, 'b n i h -> b n i 1 h') * rearrange(cross_coors_sign_j, 'b n j h -> b n 1 j h')
+            cross_coors_sign = rearrange(cross_coors_sign, 'b n i j h -> b n (i j) 1 h')
+
+            cross_coors = cross_coors * cross_coors_sign
 
         rel_coors = self.norm_rel_coors(rel_coors)
         rel_coors = repeat(rel_coors, 'b i j c -> b i j c h', h = h)

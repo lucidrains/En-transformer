@@ -2,6 +2,8 @@
 
 Implementation of E(n)-Equivariant Transformer, which extends the ideas from Welling's <a href="https://github.com/lucidrains/egnn-pytorch">E(n)-Equivariant Graph Neural Network</a> with attention.
 
+Update: Used for <a href="https://www.biorxiv.org/content/10.1101/2023.07.15.549154v2">designing of CDR loops in antibodies!</a>
+
 ## Install
 
 ```bash
@@ -187,5 +189,19 @@ $ python denoise.py
     booktitle = {International Conference on Machine Learning},
     year    = {2020},
     url     = {https://api.semanticscholar.org/CorpusID:219530837}
+}
+```
+
+```bibtex
+@article {Mahajan2023.07.15.549154,
+    author  = {Sai Pooja Mahajan and Jeffrey A. Ruffolo and Jeffrey J. Gray},
+    title   = {Contextual protein and antibody encodings from equivariant graph transformers},
+    elocation-id = {2023.07.15.549154},
+    year    = {2023},
+    doi     = {10.1101/2023.07.15.549154},
+    publisher = {Cold Spring Harbor Laboratory},
+    URL     = {https://www.biorxiv.org/content/early/2023/07/29/2023.07.15.549154},
+    eprint  = {https://www.biorxiv.org/content/early/2023/07/29/2023.07.15.549154.full.pdf},
+    journal = {bioRxiv}
 }
 ```

@@ -35,7 +35,7 @@ edges = torch.randn(1, 1024, 1024, 4)
 
 mask = torch.ones(1, 1024).bool()
 
-feats, coors = model(feats, coors, edges, mask = mask)  # (1, 16, 512), (1, 16, 3)
+feats, coors = model(feats, coors, edges, mask = mask)  # (1, 1024, 512), (1, 1024, 3)
 ```
 
 Letting the network take care of both atomic and bond type embeddings

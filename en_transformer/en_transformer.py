@@ -206,7 +206,9 @@ class EquivariantAttention(nn.Module):
         use_cross_product = False,
         talking_heads = False,        
         dropout = 0.,
-        num_global_linear_attn_heads = 0
+        num_global_linear_attn_heads = 0,
+        gate_outputs = True,
+        gate_init_bias = 10.
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -224,6 +226,18 @@ class EquivariantAttention(nn.Module):
 
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
         self.to_out = nn.Linear(attn_inner_dim + self.linear_attn.dim_hidden, dim)
+
+        self.gate_outputs = gate_outputs
+        if gate_outputs:
+            gate_linear = nn.Linear(dim, 2 * heads)
+            nn.init.zeros_(gate_linear.weight)
+            nn.init.constant_(gate_linear.bias, gate_init_bias)
+
+            self.to_output_gates = nn.Sequential(
+                gate_linear,
+                nn.Sigmoid(),
+                Rearrange('b n (l h) -> l b h n 1', h = heads)
+            )
 
         self.talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if talking_heads else None
 
@@ -357,6 +371,11 @@ class EquivariantAttention(nn.Module):
         q, k, v = self.to_qkv(feats).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
+        # to give network ability to attend to nothing
+
+        if self.gate_outputs:
+            out_gate, rel_out_gate = self.to_output_gates(feats)
+
         # calculate nearest neighbors
 
         i = j = n
@@ -487,13 +506,16 @@ class EquivariantAttention(nn.Module):
 
         # aggregate and combine heads for coordinate updates
 
-        rel_out = einsum('b i j h, b i j c h -> b i c h', coor_attn, rel_coors)
+        rel_out = einsum('b i j h, b i j c h -> b h i c', coor_attn, rel_coors)
+
+        if self.gate_outputs:
+            rel_out = rel_out * rel_out_gate
 
         if self.use_cross_product:
-            cross_out = einsum('b i j h, b i j c h -> b i c h', cross_attn, cross_coors)
-            rel_out = torch.cat((rel_out, cross_out), dim = -1)
+            cross_out = einsum('b i j h, b i j c h -> b h i c', cross_attn, cross_coors)
+            rel_out = torch.cat((rel_out, cross_out), dim = 1)
 
-        coors_out = einsum('b n c h, h -> b n c', rel_out, self.coors_combine)
+        coors_out = einsum('b h n c, h -> b n c', rel_out, self.coors_combine)
 
         # derive attention
 
@@ -512,6 +534,9 @@ class EquivariantAttention(nn.Module):
         # weighted sum of values and combine heads
 
         out = einsum('b h i j, b h i j d -> b h i d', attn, v)
+
+        if self.gate_outputs:
+            out = out * out_gate
 
         out = rearrange(out, 'b h n d -> b n (h d)')
 
@@ -567,7 +592,8 @@ class EnTransformer(nn.Module):
         checkpoint = False,
         attn_dropout = 0.,
         ff_dropout = 0.,
-        num_global_linear_attn_heads = 0
+        num_global_linear_attn_heads = 0,
+        gate_outputs = True
     ):
         super().__init__()
         assert dim_head >= 32, 'your dimension per head should be greater than 32 for rotary embeddings to work well'
@@ -604,7 +630,8 @@ class EnTransformer(nn.Module):
                     use_cross_product = use_cross_product,
                     talking_heads = talking_heads,
                     dropout = attn_dropout,
-                    num_global_linear_attn_heads = num_global_linear_attn_heads
+                    num_global_linear_attn_heads = num_global_linear_attn_heads,
+                    gate_outputs = gate_outputs
                 )),
                 Residual(FeedForward(
                     dim = dim,

@@ -6,6 +6,7 @@ setup(
   version = '1.4.0',
   license='MIT',
   description = 'E(n)-Equivariant Transformer',
+  long_description_content_type = 'text/markdown',
   author = 'Phil Wang',
   author_email = 'lucidrains@gmail.com',
   url = 'https://github.com/lucidrains/En-transformer',

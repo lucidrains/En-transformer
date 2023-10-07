@@ -1,6 +1,6 @@
 ## E(n)-Equivariant Transformer
 
-Implementation of E(n)-Equivariant Transformer, which extends the ideas from Welling's <a href="https://github.com/lucidrains/egnn-pytorch">E(n)-Equivariant Graph Neural Network</a> with attention.
+Implementation of E(n)-Equivariant Transformer, which extends the ideas from Welling's <a href="https://github.com/lucidrains/egnn-pytorch">E(n)-Equivariant Graph Neural Network</a> with attention mechanisms and ideas from transformer architecture.
 
 Update: Used for <a href="https://www.biorxiv.org/content/10.1101/2023.07.15.549154v2">designing of CDR loops in antibodies!</a>
 

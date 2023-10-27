@@ -153,11 +153,15 @@ class LinearAttention(nn.Module):
         self,
         dim,
         dim_head = 64,
-        heads = 8
+        heads = 8,
+        scale = 8
     ):
         super().__init__()
         self.heads = heads
         self.dim_hidden = dim_head * heads
+        self.scale = scale
+        self.temperature = nn.Parameter(torch.zeros(heads, 1, 1))
+
         self.to_qkv = nn.Linear(dim, self.dim_hidden * 3)
 
     def forward(self, x, mask = None):
@@ -167,19 +171,21 @@ class LinearAttention(nn.Module):
             x = rearrange(x, '... 1 -> ...')
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h d n', h = self.heads), (q, k, v))
 
         if exists(mask):
-            mask = rearrange(mask, 'b n -> b 1 n 1')
-            k = k.masked_fill(~mask, -torch.finfo(q.dtype).max)
-            v = v.masked_fill(~mask, 0.)
+            mask = rearrange(mask, 'b n -> b 1 1 n')
+            q, k, v = map(lambda t: t.masked_fill(~mask, 0.), (q, k, v))
 
-        k = k.softmax(dim = -2)
-        q = q.softmax(dim = -1)
+        q, k = map(l2norm, (q, k))
 
-        kv = einsum('b h n d, b h n e -> b h d e', k, v)
-        out = einsum('b h d e, b h n d -> b h n e', kv, q)
-        out = rearrange(out, 'b h n d -> b n (h d)')
+        sim = einsum('b h i n, b h j n -> b h i j', q, k)
+        sim = sim * self.temperature.exp() * self.scale
+
+        attn = sim.softmax(dim = -1)
+
+        out = einsum('b h i j, b h j n -> b h i n', attn, v)
+        out = rearrange(out, 'b h d n -> b n (h d)')
 
         if has_degree_m_dim:
             out = rearrange(out, '... -> ... 1')

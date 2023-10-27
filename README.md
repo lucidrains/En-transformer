@@ -175,14 +175,6 @@ $ python denoise.py
 ```
 
 ```bibtex
-@inproceedings{Shen2018DecomposedAS,
-    title   = {Decomposed Attention: Self-Attention with Linear Complexities},
-    author  = {Zhuoran Shen and Mingyuan Zhang and Haiyu Zhao and Shuai Yi and Hongsheng Li},
-    year    = {2018}
-}
-```
-
-```bibtex
 @inproceedings{Kim2020TheLC,
     title   = {The Lipschitz Constant of Self-Attention},
     author  = {Hyunjik Kim and George Papamakarios and Andriy Mnih},
@@ -214,5 +206,15 @@ $ python denoise.py
     year    = {2023},
     volume  = {abs/2306.12929},
     url     = {https://api.semanticscholar.org/CorpusID:259224568}
+}
+```
+
+```bibtex
+@inproceedings{ElNouby2021XCiTCI,
+    title   = {XCiT: Cross-Covariance Image Transformers},
+    author  = {Alaaeldin El-Nouby and Hugo Touvron and Mathilde Caron and Piotr Bojanowski and Matthijs Douze and Armand Joulin and Ivan Laptev and Natalia Neverova and Gabriel Synnaeve and Jakob Verbeek and Herv{\'e} J{\'e}gou},
+    booktitle = {Neural Information Processing Systems},
+    year    = {2021},
+    url     = {https://api.semanticscholar.org/CorpusID:235458262}
 }
 ```

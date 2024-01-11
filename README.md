@@ -26,7 +26,7 @@ model = EnTransformer(
     talking_heads = True,            # use Shazeer's talking heads https://arxiv.org/abs/2003.02436
     checkpoint = True,               # use checkpointing so one can increase depth at little memory cost (and increase neighbors attended to)
     use_cross_product = True,        # use cross product vectors (idea by @MattMcPartlon)
-    num_global_linear_attn_heads = 2 # if your number of neighbors above is low, you can assign a certain number of attention heads to weakly attend globally to all other nodes through linear attention (https://arxiv.org/abs/1812.01243)
+    num_global_linear_attn_heads = 4 # if your number of neighbors above is low, you can assign a certain number of attention heads to weakly attend globally to all other nodes through linear attention (https://arxiv.org/abs/1812.01243)
 )
 
 feats = torch.randn(1, 1024, 512)
@@ -210,11 +210,10 @@ $ python denoise.py
 ```
 
 ```bibtex
-@inproceedings{ElNouby2021XCiTCI,
-    title   = {XCiT: Cross-Covariance Image Transformers},
-    author  = {Alaaeldin El-Nouby and Hugo Touvron and Mathilde Caron and Piotr Bojanowski and Matthijs Douze and Armand Joulin and Ivan Laptev and Natalia Neverova and Gabriel Synnaeve and Jakob Verbeek and Herv{\'e} J{\'e}gou},
-    booktitle = {Neural Information Processing Systems},
-    year    = {2021},
-    url     = {https://api.semanticscholar.org/CorpusID:235458262}
+@inproceedings{Arora2023ZoologyMA,
+    title   = {Zoology: Measuring and Improving Recall in Efficient Language Models},
+    author  = {Simran Arora and Sabri Eyuboglu and Aman Timalsina and Isys Johnson and Michael Poli and James Zou and Atri Rudra and Christopher R'e},
+    year    = {2023},
+    url     = {https://api.semanticscholar.org/CorpusID:266149332}
 }
 ```

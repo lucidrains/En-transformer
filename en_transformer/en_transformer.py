@@ -6,6 +6,8 @@ from torch.utils.checkpoint import checkpoint_sequential
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
+from taylor_series_linear_attention import TaylorSeriesLinearAttn
+
 # helper functions
 
 def exists(val):
@@ -148,50 +150,6 @@ class FeedForward(nn.Module):
     def forward(self, feats, coors):
         return self.net(feats), 0
 
-class LinearAttention(nn.Module):
-    def __init__(
-        self,
-        dim,
-        dim_head = 64,
-        heads = 8,
-        scale = 8
-    ):
-        super().__init__()
-        self.heads = heads
-        self.dim_hidden = dim_head * heads
-        self.scale = scale
-        self.temperature = nn.Parameter(torch.zeros(heads, 1, 1))
-
-        self.to_qkv = nn.Linear(dim, self.dim_hidden * 3)
-
-    def forward(self, x, mask = None):
-        has_degree_m_dim = x.ndim == 4
-
-        if has_degree_m_dim:
-            x = rearrange(x, '... 1 -> ...')
-
-        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h d n', h = self.heads), (q, k, v))
-
-        if exists(mask):
-            mask = rearrange(mask, 'b n -> b 1 1 n')
-            q, k, v = map(lambda t: t.masked_fill(~mask, 0.), (q, k, v))
-
-        q, k = map(l2norm, (q, k))
-
-        sim = einsum('b h i n, b h j n -> b h i j', q, k)
-        sim = sim * self.temperature.exp() * self.scale
-
-        attn = sim.softmax(dim = -1)
-
-        out = einsum('b h i j, b h j n -> b h i n', attn, v)
-        out = rearrange(out, 'b h d n -> b n (h d)')
-
-        if has_degree_m_dim:
-            out = rearrange(out, '... -> ... 1')
-
-        return out
-
 class EquivariantAttention(nn.Module):
     def __init__(
         self,
@@ -213,6 +171,7 @@ class EquivariantAttention(nn.Module):
         talking_heads = False,        
         dropout = 0.,
         num_global_linear_attn_heads = 0,
+        linear_attn_dim_head = 8,
         gate_outputs = True,
         gate_init_bias = 10.
     ):
@@ -228,7 +187,13 @@ class EquivariantAttention(nn.Module):
         self.heads = heads
 
         self.has_linear_attn = num_global_linear_attn_heads > 0
-        self.linear_attn = LinearAttention(dim = dim, dim_head = dim_head, heads = num_global_linear_attn_heads)
+
+        self.linear_attn = TaylorSeriesLinearAttn(
+            dim = dim,
+            dim_head = linear_attn_dim_head,
+            heads = num_global_linear_attn_heads,
+            combine_heads = False
+        )
 
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
         self.to_out = nn.Linear(attn_inner_dim + self.linear_attn.dim_hidden, dim)

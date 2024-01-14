@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'En-transformer',
   packages = find_packages(),
-  version = '1.6.0',
+  version = '1.6.2',
   license='MIT',
   description = 'E(n)-Equivariant Transformer',
   long_description_content_type = 'text/markdown',
@@ -18,7 +18,7 @@ setup(
   ],
   install_requires=[
     'einops>=0.3',
-    'taylor-series-linear-attention>=0.0.11',
+    'taylor-series-linear-attention>=0.1.4',
     'torch>=1.7'
   ],
   setup_requires=[

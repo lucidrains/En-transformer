@@ -192,6 +192,7 @@ class EquivariantAttention(nn.Module):
             dim = dim,
             dim_head = linear_attn_dim_head,
             heads = num_global_linear_attn_heads,
+            gate_value_heads = True,
             combine_heads = False
         )
 

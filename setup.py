@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'En-transformer',
   packages = find_packages(),
-  version = '1.6.2',
+  version = '1.6.3',
   license='MIT',
   description = 'E(n)-Equivariant Transformer',
   long_description_content_type = 'text/markdown',

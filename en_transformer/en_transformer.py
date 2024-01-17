@@ -352,12 +352,9 @@ class EquivariantAttention(nn.Module):
 
         if exists(mask):
             q_mask = rearrange(mask, 'b i -> b 1 i 1')
-            k_mask = repeat(mask, 'b j -> b i j', i = n)
 
             if exists(nbhd_indices):
-                k_mask = get_at('b i [j], b i k -> b i k', k_mask, nbhd_indices)
-
-            k_mask = rearrange(k_mask, 'b i j -> b 1 i j')
+                k_mask = get_at('b [j], b i k -> b 1 i k', mask, nbhd_indices)
 
             mask = q_mask * k_mask
 

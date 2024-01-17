@@ -3,6 +3,8 @@ import torch.nn.functional as F
 from torch import nn, einsum
 from torch.utils.checkpoint import checkpoint_sequential
 
+from einx import get_at
+
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
@@ -25,22 +27,6 @@ def l2norm(t):
 def small_init_(t: nn.Linear):
     nn.init.normal_(t.weight, std = 0.02)
     nn.init.zeros_(t.bias)
-
-def batched_index_select(values, indices, dim = 1):
-    value_dims = values.shape[(dim + 1):]
-    values_shape, indices_shape = map(lambda t: list(t.shape), (values, indices))
-    indices = indices[(..., *((None,) * len(value_dims)))]
-    indices = indices.expand(*((-1,) * len(indices_shape)), *value_dims)
-    value_expand_len = len(indices_shape) - (dim + 1)
-    values = values[(*((slice(None),) * dim), *((None,) * value_expand_len), ...)]
-
-    value_expand_shape = [-1] * len(values.shape)
-    expand_slice = slice(dim, (dim + value_expand_len))
-    value_expand_shape[expand_slice] = indices.shape[expand_slice]
-    values = values.expand(*value_expand_shape)
-
-    dim += value_expand_len
-    return values.gather(dim, indices)
 
 # dynamic positional bias
 
@@ -354,11 +340,10 @@ class EquivariantAttention(nn.Module):
 
         if exists(nbhd_indices):
             i, j = nbhd_indices.shape[-2:]
-            nbhd_indices_with_heads = repeat(nbhd_indices, 'b n d -> b h n d', h = h)
-            k         = batched_index_select(k, nbhd_indices_with_heads, dim = 2)
-            v         = batched_index_select(v, nbhd_indices_with_heads, dim = 2)
-            rel_dist  = batched_index_select(rel_dist, nbhd_indices, dim = 2)
-            rel_coors = batched_index_select(rel_coors, nbhd_indices, dim = 2)
+            k         = get_at('b h [j] d, b i k -> b h i k d', k, nbhd_indices)
+            v         = get_at('b h [j] d, b i k -> b h i k d', v, nbhd_indices)
+            rel_dist  = get_at('b i [j], b i k -> b i k', rel_dist, nbhd_indices)
+            rel_coors = get_at('b i [j] c, b i k -> b i k c', rel_coors, nbhd_indices)
         else:
             k = repeat(k, 'b h j d -> b h n j d', n = n)
             v = repeat(v, 'b h j d -> b h n j d', n = n)
@@ -370,7 +355,7 @@ class EquivariantAttention(nn.Module):
             k_mask = repeat(mask, 'b j -> b i j', i = n)
 
             if exists(nbhd_indices):
-                k_mask = batched_index_select(k_mask, nbhd_indices, dim = 2)
+                k_mask = get_at('b i [j], b i k -> b i k', k_mask, nbhd_indices)
 
             k_mask = rearrange(k_mask, 'b i j -> b 1 i j')
 
@@ -414,7 +399,7 @@ class EquivariantAttention(nn.Module):
 
         if exists(edges):
             if exists(nbhd_indices):
-                edges = batched_index_select(edges, nbhd_indices, dim = 2)
+                edges = get_at('b i [j] d, b i k -> b i k d', edges, nbhd_indices)
 
             qk = rearrange(qk, 'b h i j -> b i j h')
             qk = torch.cat((qk, edges), dim = -1)

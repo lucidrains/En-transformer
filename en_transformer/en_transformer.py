@@ -162,6 +162,9 @@ class EquivariantAttention(nn.Module):
         gate_init_bias = 10.
     ):
         super().__init__()
+        neighbors = default(neighbors, 0)
+        neighbors = max(neighbors, 0)
+
         self.scale = dim_head ** -0.5
         self.norm = LayerNorm(dim)
 
@@ -174,16 +177,20 @@ class EquivariantAttention(nn.Module):
 
         self.has_linear_attn = num_global_linear_attn_heads > 0
 
-        self.linear_attn = TaylorSeriesLinearAttn(
-            dim = dim,
-            dim_head = linear_attn_dim_head,
-            heads = num_global_linear_attn_heads,
-            gate_value_heads = True,
-            combine_heads = False
-        )
+        linear_attn_dim_hidden = 0
+        if self.has_linear_attn:
+            self.linear_attn = TaylorSeriesLinearAttn(
+                dim = dim,
+                dim_head = linear_attn_dim_head,
+                heads = num_global_linear_attn_heads,
+                gate_value_heads = True,
+                combine_heads = False
+            )
+
+            linear_attn_dim_hidden = self.linear_attn.dim_hidden
 
         self.to_qkv = nn.Linear(dim, attn_inner_dim * 3, bias = False)
-        self.to_out = nn.Linear(attn_inner_dim + self.linear_attn.dim_hidden, dim)
+        self.to_out = nn.Linear(attn_inner_dim + linear_attn_dim_hidden, dim)
 
         self.gate_outputs = gate_outputs
         if gate_outputs:
